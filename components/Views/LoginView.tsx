@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { BookOpen, User, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle, AlertTriangle } from 'lucide-react';
+import { BookOpen, User, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 
 interface LoginViewProps {
   onLogin: (session: any) => void;
 }
 
+type AuthMode = 'login' | 'register' | 'forgot_password';
+
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [mode, setMode] = useState<AuthMode>('login');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -19,9 +21,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  const clearMessages = () => {
+    setError('');
+    setSuccessMsg('');
+  };
+
+  const switchMode = (newMode: AuthMode) => {
+    setMode(newMode);
+    clearMessages();
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    clearMessages();
     setLoading(true);
 
     if (password !== confirmPassword) {
@@ -36,28 +48,34 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       return;
     }
 
+    if (!name.trim()) {
+      setError('Por favor, informe seu nome.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            name: name,
+            name: name, // Vital for Profile Trigger
           },
         },
       });
 
       if (authError) throw authError;
 
-      setSuccessMsg('Conta criada! Verifique seu e-mail se necessário, ou aguarde o login.');
-      
-      // Auto-login handles via session listener in App.tsx generally, 
-      // but signUp might sign in automatically depending on config.
+      // Check if session is established (auto-confirm disabled) or if email confirm is needed
       if (data.session) {
         onLogin(data.session);
+      } else {
+        setSuccessMsg('Conta criada com sucesso! Se necessário, verifique seu e-mail para confirmar o cadastro.');
+        setTimeout(() => switchMode('login'), 3000);
       }
     } catch (err: any) {
-      setError(err.message || 'Erro ao criar conta.');
+      setError(err.message || 'Erro ao criar conta. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -65,7 +83,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    clearMessages();
     setLoading(true);
 
     try {
@@ -86,15 +104,35 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     }
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+    setLoading(true);
+
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin, // Redirects back to app to handle password update
+      });
+
+      if (resetError) throw resetError;
+
+      setSuccessMsg('Instruções de recuperação enviadas para o seu e-mail.');
+    } catch (err: any) {
+      setError(err.message || 'Erro ao enviar e-mail de recuperação.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col items-center justify-center px-6 relative overflow-hidden transition-colors duration-500">
       <div className="absolute top-[-10%] right-[-10%] w-64 h-64 bg-blue-50 dark:bg-blue-900/20 rounded-full blur-3xl opacity-60" />
       <div className="absolute bottom-[-10%] left-[-10%] w-64 h-64 bg-orange-50 dark:bg-orange-900/20 rounded-full blur-3xl opacity-60" />
 
       {/* Main Login Card */}
-      <div className="z-10 w-full max-w-sm text-center space-y-8 animate-in fade-in zoom-in duration-700">
+      <div className="z-10 w-full max-w-sm text-center space-y-6 animate-in fade-in zoom-in duration-700">
         
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-4 mb-6">
           <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-xl shadow-blue-200 dark:shadow-none mb-2">
             <BookOpen size={48} color="white" strokeWidth={1.5} />
           </div>
@@ -105,30 +143,48 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
             <p className="text-blue-600 dark:text-blue-400 font-bold text-xs mt-2 uppercase tracking-widest">
               Transforme sua vida em 365 dias
             </p>
-            <p className="text-gray-500 dark:text-slate-400 mt-3 text-sm max-w-[280px] mx-auto leading-relaxed">
-              Mergulhe na sabedoria eterna de Gênesis a Apocalipse e renove suas forças diariamente.
-            </p>
           </div>
         </div>
 
-        <div className="bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm p-1 rounded-xl flex border border-gray-100 dark:border-slate-800">
-          <button 
-            onClick={() => !loading && setIsRegistering(false)}
-            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${!isRegistering ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700'}`}
-          >
-            Entrar
-          </button>
-          <button 
-            onClick={() => !loading && setIsRegistering(true)}
-            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${isRegistering ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700'}`}
-          >
-            Cadastrar
-          </button>
-        </div>
+        {/* Auth Tabs */}
+        {mode !== 'forgot_password' && (
+          <div className="bg-gray-100 dark:bg-slate-900 p-1 rounded-xl flex">
+            <button 
+              onClick={() => !loading && switchMode('login')}
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${mode === 'login' ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700'}`}
+            >
+              Entrar
+            </button>
+            <button 
+              onClick={() => !loading && switchMode('register')}
+              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${mode === 'register' ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700'}`}
+            >
+              Criar Conta
+            </button>
+          </div>
+        )}
 
-        <form className="space-y-4 pt-2 text-left" onSubmit={isRegistering ? handleRegister : handleLogin}>
+        <form className="space-y-4 pt-2 text-left" onSubmit={
+          mode === 'login' ? handleLogin : 
+          mode === 'register' ? handleRegister : 
+          handleForgotPassword
+        }>
            
-           {isRegistering && (
+           {/* Header for Forgot Password Mode */}
+           {mode === 'forgot_password' && (
+             <div className="flex items-center gap-2 mb-4">
+               <button 
+                type="button" 
+                onClick={() => switchMode('login')}
+                className="p-2 -ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200"
+               >
+                 <ArrowLeft size={20} />
+               </button>
+               <h3 className="font-bold text-gray-800 dark:text-white">Recuperar Senha</h3>
+             </div>
+           )}
+
+           {mode === 'register' && (
              <div className="space-y-1 animate-in slide-in-from-left-4 fade-in duration-300">
                <label className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase ml-1">Nome Completo</label>
                <div className="relative">
@@ -139,7 +195,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full pl-11 pr-4 py-3.5 rounded-xl bg-gray-50 dark:bg-slate-900 border border-transparent focus:bg-white dark:focus:bg-slate-800 focus:border-blue-200 dark:focus:border-blue-900 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 transition-all outline-none text-sm dark:text-white"
-                    required={isRegistering}
+                    required={mode === 'register'}
                   />
                </div>
              </div>
@@ -160,29 +216,42 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
              </div>
            </div>
 
-           <div className="space-y-1">
-             <label className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase ml-1">Senha</label>
-             <div className="relative">
-                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input 
-                  type={showPassword ? "text" : "password"}
-                  placeholder="********" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-11 py-3.5 rounded-xl bg-gray-50 dark:bg-slate-900 border border-transparent focus:bg-white dark:focus:bg-slate-800 focus:border-blue-200 dark:focus:border-blue-900 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 transition-all outline-none text-sm dark:text-white"
-                  required
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+           {mode !== 'forgot_password' && (
+             <div className="space-y-1">
+               <div className="flex justify-between items-center ml-1">
+                 <label className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase">Senha</label>
+                 {mode === 'login' && (
+                   <button 
+                    type="button" 
+                    onClick={() => switchMode('forgot_password')}
+                    className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                   >
+                     Esqueci a senha
+                   </button>
+                 )}
+               </div>
+               <div className="relative">
+                  <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input 
+                    type={showPassword ? "text" : "password"}
+                    placeholder="********" 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-11 pr-11 py-3.5 rounded-xl bg-gray-50 dark:bg-slate-900 border border-transparent focus:bg-white dark:focus:bg-slate-800 focus:border-blue-200 dark:focus:border-blue-900 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 transition-all outline-none text-sm dark:text-white"
+                    required
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+               </div>
              </div>
-           </div>
+           )}
 
-           {isRegistering && (
+           {mode === 'register' && (
              <div className="space-y-1 animate-in slide-in-from-right-4 fade-in duration-300">
                <label className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase ml-1">Confirmar Senha</label>
                <div className="relative">
@@ -193,7 +262,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className="w-full pl-11 pr-4 py-3.5 rounded-xl bg-gray-50 dark:bg-slate-900 border border-transparent focus:bg-white dark:focus:bg-slate-800 focus:border-blue-200 dark:focus:border-blue-900 focus:ring-4 focus:ring-blue-50 dark:focus:ring-blue-900/20 transition-all outline-none text-sm dark:text-white"
-                    required={isRegistering}
+                    required={mode === 'register'}
                   />
                </div>
              </div>
@@ -216,15 +285,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
            <button 
               type="submit"
               disabled={loading}
-              className="w-full bg-[#2C6BA6] text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-200 dark:shadow-none hover:bg-[#20558a] transition-all active:scale-95 disabled:opacity-70 flex items-center justify-center gap-2 mt-2"
+              className="w-full bg-[#2C6BA6] text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-200 dark:shadow-none hover:bg-[#20558a] transition-all active:scale-95 disabled:opacity-70 flex items-center justify-center gap-2 mt-4"
            >
-              {loading ? 'Conectando...' : (isRegistering ? 'Criar Conta e Entrar' : 'Acessar Jornada')}
-              {!loading && <ArrowRight size={18} />}
+              {loading ? 'Processando...' : (
+                mode === 'login' ? 'Acessar Jornada' : 
+                mode === 'register' ? 'Criar Conta e Entrar' : 'Enviar E-mail'
+              )}
+              {!loading && mode !== 'forgot_password' && <ArrowRight size={18} />}
            </button>
         </form>
 
         <p className="text-xs text-gray-400 dark:text-slate-600 mt-8 max-w-xs mx-auto leading-relaxed">
-           Seus dados são salvos na nuvem de forma segura para você acessar de qualquer dispositivo.
+           Seus dados são salvos na nuvem de forma segura.
         </p>
       </div>
     </div>
