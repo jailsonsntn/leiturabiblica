@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, User, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { BookOpen, User, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle, AlertTriangle, ArrowLeft, WifiOff } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 
 interface LoginViewProps {
@@ -14,6 +14,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [showGuestOption, setShowGuestOption] = useState(false);
 
   // Form State
   const [name, setName] = useState('');
@@ -21,7 +22,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Ref to track if component is mounted to avoid memory leaks/errors on state update
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -31,8 +31,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     };
   }, []);
 
-  // Helper to race promises against a timeout
-  // Aumentado para 30s para lidar com "Cold Start" do Supabase (bancos pausados)
   const withTimeout = (promise: Promise<any>, ms = 30000): Promise<any> => {
     return Promise.race([
       promise,
@@ -50,6 +48,27 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const switchMode = (newMode: AuthMode) => {
     setMode(newMode);
     clearMessages();
+  };
+
+  const handleGuestLogin = () => {
+    // Check if we have a previous guest ID
+    let guestId = localStorage.getItem('leitura_anual_last_guest_id');
+    if (!guestId) {
+        guestId = `guest_${Date.now()}`;
+        localStorage.setItem('leitura_anual_last_guest_id', guestId);
+    }
+
+    const mockSession = {
+        user: {
+            id: guestId,
+            email: 'convidado@offline',
+            user_metadata: { 
+                name: 'Visitante',
+                avatar_url: null 
+            }
+        }
+    };
+    onLogin(mockSession);
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -82,7 +101,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           password,
           options: {
             data: {
-              name: name, // Vital for Profile Trigger
+              name: name,
             },
           },
         })
@@ -91,7 +110,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       if (authError) throw authError;
 
       if (isMounted.current) {
-        // Check if session is established (auto-confirm disabled) or if email confirm is needed
         if (data.session) {
           onLogin(data.session);
         } else {
@@ -103,10 +121,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       }
     } catch (err: any) {
       if (isMounted.current) {
+        setShowGuestOption(true);
         if (err.message === 'TIMEOUT') {
-           setError('O servidor está demorando para responder (pode estar "acordando"). Tente novamente em alguns segundos.');
+           setError('O servidor está demorando para responder.');
         } else {
-           setError(err.message || 'Erro ao criar conta. Tente novamente.');
+           setError(err.message || 'Erro ao criar conta.');
         }
       }
     } finally {
@@ -134,8 +153,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
       }
     } catch (err: any) {
       if (isMounted.current) {
+        setShowGuestOption(true);
         if (err.message === 'TIMEOUT') {
-           setError('O servidor está demorando para responder (pode estar "acordando"). Tente novamente em alguns segundos.');
+           setError('O servidor está demorando para responder.');
         } else {
            setError('E-mail ou senha incorretos.');
         }
@@ -153,7 +173,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     try {
       const { error: resetError } = await withTimeout(
         supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin, // Redirects back to app to handle password update
+          redirectTo: window.location.origin,
         })
       );
 
@@ -345,6 +365,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               {!loading && mode !== 'forgot_password' && <ArrowRight size={18} />}
            </button>
         </form>
+
+        {(showGuestOption || error) && (
+          <button 
+            onClick={handleGuestLogin}
+            className="w-full py-3 rounded-xl border border-dashed border-gray-300 dark:border-slate-700 text-gray-500 dark:text-slate-400 text-sm font-semibold hover:bg-gray-50 dark:hover:bg-slate-900 transition-colors flex items-center justify-center gap-2 animate-in fade-in slide-in-from-bottom-2"
+          >
+            <WifiOff size={16} />
+            Continuar como Convidado (Offline)
+          </button>
+        )}
 
         <p className="text-xs text-gray-400 dark:text-slate-600 mt-8 max-w-xs mx-auto leading-relaxed">
            Seus dados são salvos na nuvem de forma segura.
