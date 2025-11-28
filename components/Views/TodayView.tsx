@@ -38,21 +38,31 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
   // Pre-start or Post-end check
   const isPreStart = currentPlanDayRaw < 1;
-  const isPostEnd = currentPlanDayRaw > 365;
 
   // Sync state when entry changes
+  // Added entry.readingPlanRange to dependencies to ensure reset when plan changes
   useEffect(() => {
     if (isDayCompleted) {
       setCheckedChapters(entry.chaptersToRead);
     } else {
-      if (checkedChapters.length === entry.chaptersToRead.length) {
+      // If incomplete, check if we need to reset partial progress
+      // (e.g. if we switched plans, the previous partial checks might be invalid)
+      // For now, we only clear if full (which shouldn't happen if !isDayCompleted, 
+      // but serves as a safety reset) or simply re-initialize empty.
+      // Ideally, we keep local state unless the book/chapters change.
+      
+      // If the current checked chapters don't align with the new entry's chapters 
+      // (e.g. switched from Genesis to Psalms), we should clear them.
+      const currentChecksAreValid = checkedChapters.every(c => entry.chaptersToRead.includes(c));
+      
+      if (!currentChecksAreValid || checkedChapters.length === entry.chaptersToRead.length) {
          setCheckedChapters([]);
       }
     }
     setNote(progress.notes[entry.id] || '');
     setIsEditingNote(false);
     setShowDeleteConfirm(false);
-  }, [entry.id, isDayCompleted, progress.notes]);
+  }, [entry.id, isDayCompleted, progress.notes, entry.readingPlanRange, entry.chaptersToRead.length]);
 
   // Adjust textarea height automatically
   useEffect(() => {

@@ -30,6 +30,25 @@ const calculateStreak = (completedIds: number[]): number => {
 
 const getGuestKey = (userId: string) => `leitura_anual_guest_${userId}`;
 
+// Helper for fire-and-forget background synchronization
+// This ensures the UI doesn't wait for the network
+const runBackgroundSync = (syncFn: () => Promise<void>) => {
+  syncFn().catch(err => console.error("Background sync error:", err));
+};
+
+// Robustness helper: Ensure profile exists before adding entries
+// This handles cases where the signup trigger might have failed or lagged
+const ensureProfileExists = async (userId: string) => {
+  const { data } = await supabase.from('profiles').select('id').eq('id', userId).maybeSingle();
+  if (!data) {
+     // Create a skeleton profile if missing
+     await supabase.from('profiles').upsert({ 
+       id: userId, 
+       updated_at: new Date().toISOString()
+     }, { onConflict: 'id' });
+  }
+};
+
 // --- Sync Functions ---
 
 export const loadProgress = async (userId: string): Promise<UserProgress> => {
@@ -49,19 +68,17 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
 
   // 2. SERVER MODE (SUPABASE)
   try {
+    // Parallel loading for speed
     const [profileResult, entriesResult, badgesResult] = await Promise.all([
       supabase.from('profiles').select('plan_start_date, selected_plan_id, streak').eq('id', userId).maybeSingle(),
       supabase.from('user_daily_entries').select('day_id, completed_at, note').eq('user_id', userId),
       supabase.from('user_badges').select('badge_id').eq('user_id', userId)
     ]);
 
-    const { data: profile, error: profileError } = profileResult;
-    const { data: entries, error: entriesError } = entriesResult;
-    const { data: badges, error: badgesError } = badgesResult;
+    const { data: profile } = profileResult;
+    const { data: entries } = entriesResult;
+    const { data: badges } = badgesResult;
 
-    if (profileError) console.warn("Error fetching profile:", profileError.message);
-    
-    // transform to local shape
     const completedIds = entries?.filter(e => e.completed_at).map(e => e.day_id) || [];
     const notes: Record<number, string> = {};
     entries?.forEach(e => {
@@ -81,11 +98,13 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
 
   } catch (e) {
     console.error("Failed to load progress from Supabase", e);
+    // Fallback to default if load fails, preventing crash
     return DEFAULT_PROGRESS;
   }
 };
 
 export const updatePlanStartDate = async (currentProgress: UserProgress, newDate: string, userId: string): Promise<UserProgress> => {
+  // Optimistic update
   const newProgress = { ...currentProgress, planStartDate: newDate };
   
   if (userId.startsWith('guest_')) {
@@ -93,14 +112,17 @@ export const updatePlanStartDate = async (currentProgress: UserProgress, newDate
     return newProgress;
   }
 
-  await supabase
-    .from('profiles')
-    .upsert({ id: userId, plan_start_date: newDate }, { onConflict: 'id' });
+  // Background Sync
+  runBackgroundSync(async () => {
+    await ensureProfileExists(userId);
+    await supabase.from('profiles').upsert({ id: userId, plan_start_date: newDate }, { onConflict: 'id' });
+  });
 
   return newProgress;
 };
 
 export const updateSelectedPlan = async (currentProgress: UserProgress, planId: string, userId: string): Promise<UserProgress> => {
+  // Optimistic update
   const newProgress = { ...currentProgress, selectedPlanId: planId };
   
   if (userId.startsWith('guest_')) {
@@ -108,14 +130,17 @@ export const updateSelectedPlan = async (currentProgress: UserProgress, planId: 
     return newProgress;
   }
 
-  await supabase
-    .from('profiles')
-    .upsert({ id: userId, selected_plan_id: planId }, { onConflict: 'id' });
+  // Background Sync
+  runBackgroundSync(async () => {
+    await ensureProfileExists(userId);
+    await supabase.from('profiles').upsert({ id: userId, selected_plan_id: planId }, { onConflict: 'id' });
+  });
 
   return newProgress;
 };
 
 export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: number, userId: string): Promise<UserProgress> => {
+  // 1. Calculate new state locally
   const isCompleted = currentProgress.completedIds.includes(dayId);
   let newCompletedIds: number[];
   
@@ -144,20 +169,24 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
     unlockedBadges: newUnlockedBadges
   };
 
-  // GUEST MODE
+  // 2. Persist Guest Mode
   if (userId.startsWith('guest_')) {
     localStorage.setItem(getGuestKey(userId), JSON.stringify(updatedProgress));
     return updatedProgress;
   }
 
-  // SERVER MODE
-  try {
+  // 3. Background Sync (Server Mode)
+  runBackgroundSync(async () => {
+    await ensureProfileExists(userId);
+
     if (isCompleted) {
+      // Unmarking: use update to set null
       await supabase.from('user_daily_entries')
         .update({ completed_at: null })
         .eq('user_id', userId)
         .eq('day_id', dayId);
     } else {
+      // Marking: use upsert
       await supabase.from('user_daily_entries').upsert({
         user_id: userId,
         day_id: dayId,
@@ -165,22 +194,24 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
       }, { onConflict: 'user_id, day_id' });
     }
 
+    // Update profile stats
     await supabase.from('profiles').upsert({ id: userId, streak: newStreak }, { onConflict: 'id' });
 
+    // Insert new badges
     if (badgesToInsert.length > 0) {
       await supabase.from('user_badges').upsert(
         badgesToInsert.map(bid => ({ user_id: userId, badge_id: bid })),
         { onConflict: 'user_id, badge_id' }
       );
     }
-  } catch (err) {
-      console.error("Error syncing completion:", err);
-  }
+  });
 
+  // Return immediately for instant UI update
   return updatedProgress;
 };
 
 export const saveDayNote = async (currentProgress: UserProgress, dayId: number, note: string, userId: string): Promise<UserProgress> => {
+  // Optimistic update
   const newProgress = {
     ...currentProgress,
     notes: {
@@ -194,24 +225,30 @@ export const saveDayNote = async (currentProgress: UserProgress, dayId: number, 
     return newProgress;
   }
 
-  const { data: existing } = await supabase
-    .from('user_daily_entries')
-    .select('completed_at')
-    .eq('user_id', userId)
-    .eq('day_id', dayId)
-    .single();
+  // Background Sync
+  runBackgroundSync(async () => {
+    await ensureProfileExists(userId);
+    
+    const { data: existing } = await supabase
+      .from('user_daily_entries')
+      .select('completed_at')
+      .eq('user_id', userId)
+      .eq('day_id', dayId)
+      .maybeSingle();
 
-  await supabase.from('user_daily_entries').upsert({
-    user_id: userId,
-    day_id: dayId,
-    note: note,
-    completed_at: existing?.completed_at || null 
-  }, { onConflict: 'user_id, day_id' });
+    await supabase.from('user_daily_entries').upsert({
+      user_id: userId,
+      day_id: dayId,
+      note: note,
+      completed_at: existing?.completed_at || null 
+    }, { onConflict: 'user_id, day_id' });
+  });
 
   return newProgress;
 };
 
 export const deleteDayNote = async (currentProgress: UserProgress, dayId: number, userId: string): Promise<UserProgress> => {
+  // Optimistic update
   const newNotes = { ...currentProgress.notes };
   delete newNotes[dayId];
 
@@ -222,19 +259,24 @@ export const deleteDayNote = async (currentProgress: UserProgress, dayId: number
     return newProgress;
   }
 
-  const { data: existing } = await supabase
-    .from('user_daily_entries')
-    .select('completed_at')
-    .eq('user_id', userId)
-    .eq('day_id', dayId)
-    .single();
+  // Background Sync
+  runBackgroundSync(async () => {
+    await ensureProfileExists(userId);
 
-  await supabase.from('user_daily_entries').upsert({
-    user_id: userId,
-    day_id: dayId,
-    note: null,
-    completed_at: existing?.completed_at || null
-  }, { onConflict: 'user_id, day_id' });
+    const { data: existing } = await supabase
+      .from('user_daily_entries')
+      .select('completed_at')
+      .eq('user_id', userId)
+      .eq('day_id', dayId)
+      .maybeSingle();
+
+    await supabase.from('user_daily_entries').upsert({
+      user_id: userId,
+      day_id: dayId,
+      note: null,
+      completed_at: existing?.completed_at || null
+    }, { onConflict: 'user_id, day_id' });
+  });
 
   return newProgress;
 };

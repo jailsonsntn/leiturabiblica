@@ -126,18 +126,21 @@ const App: React.FC = () => {
 
   const handleUpdatePlanStart = async (newDate: string) => {
     if (!progress || !user) return;
+    // Optimistic Update: Service now returns updated state immediately
     const newProgress = await updatePlanStartDate(progress, newDate, user.id);
     setProgress(newProgress);
   };
 
   const handleUpdateSelectedPlan = async (planId: string) => {
     if (!progress || !user) return;
+    // Optimistic Update
     const newProgress = await updateSelectedPlan(progress, planId, user.id);
     setProgress(newProgress);
   };
 
   const handleToggleComplete = async (id: number) => {
     if (!progress || !user) return;
+    // Optimistic Update: Button feels instant now
     const newProgress = await toggleDayCompletion(progress, id, user.id);
     setProgress(newProgress);
   };
