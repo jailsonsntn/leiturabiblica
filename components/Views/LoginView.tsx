@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BookOpen, User, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 
@@ -20,6 +20,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Ref to track if component is mounted to avoid memory leaks/errors on state update
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  // Helper to race promises against a timeout
+  const withTimeout = (promise: Promise<any>, ms = 15000): Promise<any> => {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), ms)
+      ),
+    ]);
+  };
 
   const clearMessages = () => {
     setError('');
@@ -55,29 +75,41 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     }
 
     try {
-      const { data, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name: name, // Vital for Profile Trigger
+      const { data, error: authError } = await withTimeout(
+        supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name: name, // Vital for Profile Trigger
+            },
           },
-        },
-      });
+        })
+      );
 
       if (authError) throw authError;
 
-      // Check if session is established (auto-confirm disabled) or if email confirm is needed
-      if (data.session) {
-        onLogin(data.session);
-      } else {
-        setSuccessMsg('Conta criada com sucesso! Se necessário, verifique seu e-mail para confirmar o cadastro.');
-        setTimeout(() => switchMode('login'), 3000);
+      if (isMounted.current) {
+        // Check if session is established (auto-confirm disabled) or if email confirm is needed
+        if (data.session) {
+          onLogin(data.session);
+        } else {
+          setSuccessMsg('Conta criada com sucesso! Se necessário, verifique seu e-mail para confirmar o cadastro.');
+          setTimeout(() => {
+             if (isMounted.current) switchMode('login');
+          }, 3000);
+        }
       }
     } catch (err: any) {
-      setError(err.message || 'Erro ao criar conta. Tente novamente.');
+      if (isMounted.current) {
+        if (err.message === 'TIMEOUT') {
+           setError('O servidor demorou para responder. Verifique sua conexão e tente novamente.');
+        } else {
+           setError(err.message || 'Erro ao criar conta. Tente novamente.');
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) setLoading(false);
     }
   };
 
@@ -87,20 +119,28 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { data, error: authError } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
+      );
 
       if (authError) throw authError;
 
-      if (data.session) {
+      if (isMounted.current && data.session) {
         onLogin(data.session);
       }
     } catch (err: any) {
-      setError('E-mail ou senha incorretos.');
+      if (isMounted.current) {
+        if (err.message === 'TIMEOUT') {
+           setError('O servidor demorou para responder. Verifique sua conexão e tente novamente.');
+        } else {
+           setError('E-mail ou senha incorretos.');
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) setLoading(false);
     }
   };
 
@@ -110,17 +150,27 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin, // Redirects back to app to handle password update
-      });
+      const { error: resetError } = await withTimeout(
+        supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin, // Redirects back to app to handle password update
+        })
+      );
 
       if (resetError) throw resetError;
 
-      setSuccessMsg('Instruções de recuperação enviadas para o seu e-mail.');
+      if (isMounted.current) {
+        setSuccessMsg('Instruções de recuperação enviadas para o seu e-mail.');
+      }
     } catch (err: any) {
-      setError(err.message || 'Erro ao enviar e-mail de recuperação.');
+      if (isMounted.current) {
+        if (err.message === 'TIMEOUT') {
+           setError('O tempo limite foi atingido. Tente novamente.');
+        } else {
+           setError(err.message || 'Erro ao enviar e-mail de recuperação.');
+        }
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) setLoading(false);
     }
   };
 
