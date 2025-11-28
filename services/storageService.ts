@@ -32,37 +32,35 @@ const calculateStreak = (completedIds: number[]): number => {
 
 export const loadProgress = async (userId: string): Promise<UserProgress> => {
   try {
-    // 1. Fetch Profile Settings
-    // Using maybeSingle to avoid error if row doesn't exist yet (race condition on signup)
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('plan_start_date, selected_plan_id, streak')
-      .eq('id', userId)
-      .maybeSingle();
+    // Execute all requests in parallel to avoid waterfalls and reduce loading time
+    const [profileResult, entriesResult, badgesResult] = await Promise.all([
+      // 1. Fetch Profile Settings
+      supabase
+        .from('profiles')
+        .select('plan_start_date, selected_plan_id, streak')
+        .eq('id', userId)
+        .maybeSingle(),
 
-    if (profileError) {
-       console.warn("Error fetching profile:", profileError.message);
-    }
+      // 2. Fetch Entries (Completed Days & Notes)
+      supabase
+        .from('user_daily_entries')
+        .select('day_id, completed_at, note')
+        .eq('user_id', userId),
 
-    // 2. Fetch Entries (Completed Days & Notes)
-    const { data: entries, error: entriesError } = await supabase
-      .from('user_daily_entries')
-      .select('day_id, completed_at, note')
-      .eq('user_id', userId);
+      // 3. Fetch Badges
+      supabase
+        .from('user_badges')
+        .select('badge_id')
+        .eq('user_id', userId)
+    ]);
 
-    if (entriesError) {
-        console.warn("Error fetching entries:", entriesError.message);
-    }
+    const { data: profile, error: profileError } = profileResult;
+    const { data: entries, error: entriesError } = entriesResult;
+    const { data: badges, error: badgesError } = badgesResult;
 
-    // 3. Fetch Badges
-    const { data: badges, error: badgesError } = await supabase
-      .from('user_badges')
-      .select('badge_id')
-      .eq('user_id', userId);
-      
-    if (badgesError) {
-        console.warn("Error fetching badges:", badgesError.message);
-    }
+    if (profileError) console.warn("Error fetching profile:", profileError.message);
+    if (entriesError) console.warn("Error fetching entries:", entriesError.message);
+    if (badgesError) console.warn("Error fetching badges:", badgesError.message);
 
     // transform to local shape
     const completedIds = entries?.filter(e => e.completed_at).map(e => e.day_id) || [];

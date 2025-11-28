@@ -41,6 +41,15 @@ const App: React.FC = () => {
   useEffect(() => {
     let mounted = true;
 
+    // Safety timeout to prevent infinite loading screen
+    // If Supabase takes longer than 7s, we force the UI to render whatever state we have
+    const safetyTimer = setTimeout(() => {
+      if (mounted && loading) {
+        console.warn("Loading timed out, forcing UI render");
+        setLoading(false);
+      }
+    }, 7000);
+
     const initSession = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
@@ -68,6 +77,7 @@ const App: React.FC = () => {
         console.error("Unexpected auth initialization error:", err);
       } finally {
         if (mounted) setLoading(false);
+        clearTimeout(safetyTimer); // Clear safety timer if successful
       }
     };
 
@@ -95,6 +105,7 @@ const App: React.FC = () => {
 
     return () => {
       mounted = false;
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
   }, []);
