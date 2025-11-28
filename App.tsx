@@ -37,15 +37,28 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
+  // Helper to clear potential corrupted auth data
+  const clearAuthCache = () => {
+    console.warn("Clearing auth cache due to timeout/error...");
+    Object.keys(localStorage).forEach(key => {
+      // Remove Supabase specific keys that might be corrupted
+      if (key.startsWith('sb-') || key.includes('supabase.auth.token')) {
+        localStorage.removeItem(key);
+      }
+    });
+  };
+
   // Auth & Data Loading
   useEffect(() => {
     let mounted = true;
 
-    // Safety timeout to prevent infinite loading screen
+    // Safety timeout with Self-Healing
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
-        console.warn("Loading timed out, forcing UI render");
+        console.warn("Loading timed out, forcing UI render and clearing cache");
+        clearAuthCache(); // Clean bad data
         setLoading(false);
+        setUser(null); // Force login screen
       }
     }, 7000);
 
@@ -74,6 +87,8 @@ const App: React.FC = () => {
         }
       } catch (err) {
         console.error("Unexpected auth initialization error:", err);
+        // If critical error, clear cache to prevent loop
+        clearAuthCache();
       } finally {
         if (mounted) setLoading(false);
         clearTimeout(safetyTimer);
@@ -113,6 +128,7 @@ const App: React.FC = () => {
     await supabase.auth.signOut();
     setUser(null);
     setCurrentView(ViewState.HOME);
+    clearAuthCache(); // Ensure clean slate on logout
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
