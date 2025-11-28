@@ -42,7 +42,6 @@ const App: React.FC = () => {
     let mounted = true;
 
     // Safety timeout to prevent infinite loading screen
-    // If Supabase takes longer than 7s, we force the UI to render whatever state we have
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
         console.warn("Loading timed out, forcing UI render");
@@ -77,7 +76,7 @@ const App: React.FC = () => {
         console.error("Unexpected auth initialization error:", err);
       } finally {
         if (mounted) setLoading(false);
-        clearTimeout(safetyTimer); // Clear safety timer if successful
+        clearTimeout(safetyTimer);
       }
     };
 
@@ -155,6 +154,27 @@ const App: React.FC = () => {
     setProgress(newProgress);
   };
 
+  // Explicit handler to react immediately to LoginView success
+  const handleLogin = async (session: any) => {
+    setLoading(true);
+    const currentUser = {
+        id: session.user.id,
+        email: session.user.email || '',
+        name: session.user.user_metadata.name || 'Leitor',
+        photoUrl: session.user.user_metadata.avatar_url
+    };
+    setUser(currentUser);
+    
+    try {
+        const data = await loadProgress(session.user.id);
+        setProgress(data);
+    } catch (error) {
+        console.error("Manual login progress load failed", error);
+    } finally {
+        setLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950">
@@ -165,7 +185,7 @@ const App: React.FC = () => {
   }
 
   if (!user || !progress) {
-    return <LoginView onLogin={() => {}} />;
+    return <LoginView onLogin={handleLogin} />;
   }
 
   // Calculate the plan day
