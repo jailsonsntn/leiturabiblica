@@ -33,23 +33,36 @@ const calculateStreak = (completedIds: number[]): number => {
 export const loadProgress = async (userId: string): Promise<UserProgress> => {
   try {
     // 1. Fetch Profile Settings
-    const { data: profile } = await supabase
+    // Using maybeSingle to avoid error if row doesn't exist yet (race condition on signup)
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('plan_start_date, selected_plan_id, streak')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
+
+    if (profileError) {
+       console.warn("Error fetching profile:", profileError.message);
+    }
 
     // 2. Fetch Entries (Completed Days & Notes)
-    const { data: entries } = await supabase
+    const { data: entries, error: entriesError } = await supabase
       .from('user_daily_entries')
       .select('day_id, completed_at, note')
       .eq('user_id', userId);
 
+    if (entriesError) {
+        console.warn("Error fetching entries:", entriesError.message);
+    }
+
     // 3. Fetch Badges
-    const { data: badges } = await supabase
+    const { data: badges, error: badgesError } = await supabase
       .from('user_badges')
       .select('badge_id')
       .eq('user_id', userId);
+      
+    if (badgesError) {
+        console.warn("Error fetching badges:", badgesError.message);
+    }
 
     // transform to local shape
     const completedIds = entries?.filter(e => e.completed_at).map(e => e.day_id) || [];
@@ -71,19 +84,18 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
 
   } catch (e) {
     console.error("Failed to load progress from Supabase", e);
+    // Return default to prevent app crash, allowing retry or partial functionality
     return DEFAULT_PROGRESS;
   }
 };
 
 export const updatePlanStartDate = async (currentProgress: UserProgress, newDate: string, userId: string): Promise<UserProgress> => {
-  // Optimistic update
   const newProgress = { ...currentProgress, planStartDate: newDate };
   
-  // Async Save
+  // Upsert to handle case where profile row might be missing
   await supabase
     .from('profiles')
-    .update({ plan_start_date: newDate })
-    .eq('id', userId);
+    .upsert({ id: userId, plan_start_date: newDate }, { onConflict: 'id' });
 
   return newProgress;
 };
@@ -93,8 +105,7 @@ export const updateSelectedPlan = async (currentProgress: UserProgress, planId: 
   
   await supabase
     .from('profiles')
-    .update({ selected_plan_id: planId })
-    .eq('id', userId);
+    .upsert({ id: userId, selected_plan_id: planId }, { onConflict: 'id' });
 
   return newProgress;
 };
@@ -109,10 +120,8 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
     newCompletedIds = [...currentProgress.completedIds, dayId];
   }
 
-  // Calculate Streak
   const newStreak = calculateStreak(newCompletedIds);
   
-  // Check for new Badges
   const newUnlockedBadges = [...currentProgress.unlockedBadges];
   const badgesToInsert: string[] = [];
 
@@ -123,33 +132,35 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
     }
   });
 
-  // DB Updates
-  // 1. Update Entry
-  if (isCompleted) {
-    // Mark incomplete (set completed_at to null)
-    // We use upsert to preserve note if it exists
-    await supabase.from('user_daily_entries').upsert({
-      user_id: userId,
-      day_id: dayId,
-      completed_at: null
-    }, { onConflict: 'user_id, day_id' });
-  } else {
-    // Mark complete
-    await supabase.from('user_daily_entries').upsert({
-      user_id: userId,
-      day_id: dayId,
-      completed_at: new Date().toISOString()
-    }, { onConflict: 'user_id, day_id' });
-  }
+  try {
+    // 1. Update Entry
+    if (isCompleted) {
+      // Use UPDATE to set null, because row MUST exist to be completed
+      await supabase.from('user_daily_entries')
+        .update({ completed_at: null })
+        .eq('user_id', userId)
+        .eq('day_id', dayId);
+    } else {
+      // Use UPSERT for new completion
+      await supabase.from('user_daily_entries').upsert({
+        user_id: userId,
+        day_id: dayId,
+        completed_at: new Date().toISOString()
+      }, { onConflict: 'user_id, day_id' });
+    }
 
-  // 2. Update Profile Streak
-  await supabase.from('profiles').update({ streak: newStreak }).eq('id', userId);
+    // 2. Update Profile Streak (Safe upsert)
+    await supabase.from('profiles').upsert({ id: userId, streak: newStreak }, { onConflict: 'id' });
 
-  // 3. Insert Badges
-  if (badgesToInsert.length > 0) {
-    await supabase.from('user_badges').insert(
-      badgesToInsert.map(bid => ({ user_id: userId, badge_id: bid }))
-    );
+    // 3. Insert Badges
+    if (badgesToInsert.length > 0) {
+      await supabase.from('user_badges').upsert(
+        badgesToInsert.map(bid => ({ user_id: userId, badge_id: bid })),
+        { onConflict: 'user_id, badge_id' }
+      );
+    }
+  } catch (err) {
+      console.error("Error syncing completion:", err);
   }
 
   return {
@@ -161,7 +172,6 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
 };
 
 export const saveDayNote = async (currentProgress: UserProgress, dayId: number, note: string, userId: string): Promise<UserProgress> => {
-  // Optimistic update
   const newProgress = {
     ...currentProgress,
     notes: {
@@ -170,12 +180,6 @@ export const saveDayNote = async (currentProgress: UserProgress, dayId: number, 
     }
   };
 
-  // Check if entry exists to upsert safely
-  // Since we want to update ONLY the note and keep completed_at if it exists, 
-  // standard SQL update is safer, but upsert with ignoreDuplicates=false works 
-  // if we fetch first or assume partial update logic (Supabase doesn't do partial upsert easily without existing row).
-  // Strategy: Select first, then upsert.
-  
   const { data: existing } = await supabase
     .from('user_daily_entries')
     .select('completed_at')
@@ -187,7 +191,7 @@ export const saveDayNote = async (currentProgress: UserProgress, dayId: number, 
     user_id: userId,
     day_id: dayId,
     note: note,
-    completed_at: existing?.completed_at || null // Preserve or null
+    completed_at: existing?.completed_at || null 
   }, { onConflict: 'user_id, day_id' });
 
   return newProgress;
@@ -205,6 +209,7 @@ export const deleteDayNote = async (currentProgress: UserProgress, dayId: number
     .eq('day_id', dayId)
     .single();
 
+  // If no entry exists, nothing to delete, but safe to upsert null note
   await supabase.from('user_daily_entries').upsert({
     user_id: userId,
     day_id: dayId,

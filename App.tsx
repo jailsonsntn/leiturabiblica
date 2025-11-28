@@ -39,25 +39,43 @@ const App: React.FC = () => {
 
   // Auth & Data Loading
   useEffect(() => {
+    let mounted = true;
+
     const initSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata.name || 'Leitor',
-          photoUrl: session.user.user_metadata.avatar_url
-        });
-        const data = await loadProgress(session.user.id);
-        setProgress(data);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.warn("Session check warning:", error.message);
+        }
+        
+        if (mounted && session) {
+          setUser({
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.user_metadata.name || 'Leitor',
+            photoUrl: session.user.user_metadata.avatar_url
+          });
+          
+          try {
+            const data = await loadProgress(session.user.id);
+            if (mounted) setProgress(data);
+          } catch (progressError) {
+            console.error("Error loading progress:", progressError);
+          }
+        }
+      } catch (err) {
+        console.error("Unexpected auth initialization error:", err);
+      } finally {
+        if (mounted) setLoading(false);
       }
-      setLoading(false);
     };
 
     initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
+      
       if (session) {
          setUser({
           id: session.user.id,
@@ -67,7 +85,7 @@ const App: React.FC = () => {
         });
         // Reload progress on auth change
         const data = await loadProgress(session.user.id);
-        setProgress(data);
+        if (mounted) setProgress(data);
       } else {
         setUser(null);
         setProgress(null);
@@ -75,7 +93,10 @@ const App: React.FC = () => {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
