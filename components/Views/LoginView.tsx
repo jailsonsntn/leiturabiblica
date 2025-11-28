@@ -32,7 +32,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   }, []);
 
   // Helper to race promises against a timeout
-  const withTimeout = (promise: Promise<any>, ms = 15000): Promise<any> => {
+  // Aumentado para 30s para lidar com "Cold Start" do Supabase (bancos pausados)
+  const withTimeout = (promise: Promise<any>, ms = 30000): Promise<any> => {
     return Promise.race([
       promise,
       new Promise((_, reject) =>
@@ -103,7 +104,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     } catch (err: any) {
       if (isMounted.current) {
         if (err.message === 'TIMEOUT') {
-           setError('O servidor demorou para responder. Verifique sua conexão e tente novamente.');
+           setError('O servidor está demorando para responder (pode estar "acordando"). Tente novamente em alguns segundos.');
         } else {
            setError(err.message || 'Erro ao criar conta. Tente novamente.');
         }
@@ -134,7 +135,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
     } catch (err: any) {
       if (isMounted.current) {
         if (err.message === 'TIMEOUT') {
-           setError('O servidor demorou para responder. Verifique sua conexão e tente novamente.');
+           setError('O servidor está demorando para responder (pode estar "acordando"). Tente novamente em alguns segundos.');
         } else {
            setError('E-mail ou senha incorretos.');
         }
