@@ -53,14 +53,14 @@ const App: React.FC = () => {
     let mounted = true;
 
     // Safety timeout with Self-Healing
+    // Increased to 20s to allow for Cold Start of Supabase Free Tier
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
-        console.warn("Loading timed out, forcing UI render and clearing cache");
-        clearAuthCache(); // Clean bad data
+        console.warn("Loading timed out (20s). Force releasing UI.");
+        // We do NOT clear cache here anymore to avoid logging out users on slow connections/cold starts
         setLoading(false);
-        setUser(null); // Force login screen
       }
-    }, 7000);
+    }, 20000); 
 
     const initSession = async () => {
       try {
@@ -87,7 +87,7 @@ const App: React.FC = () => {
         }
       } catch (err) {
         console.error("Unexpected auth initialization error:", err);
-        // If critical error, clear cache to prevent loop
+        // Only clear cache on catastrophic error, not timeout
         clearAuthCache();
       } finally {
         if (mounted) setLoading(false);
