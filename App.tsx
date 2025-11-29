@@ -13,6 +13,8 @@ import { loadProgress, toggleDayCompletion, saveDayNote, deleteDayNote, updatePl
 import { supabase } from './services/supabaseClient';
 import { Loader2 } from 'lucide-react';
 
+const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 minutos
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.HOME);
@@ -37,15 +39,48 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
+  // Monitor de Atividade para Timeout de 30min
+  useEffect(() => {
+    const updateActivityTimestamp = () => {
+      if (user) {
+        localStorage.setItem('leitura_anual_last_active', Date.now().toString());
+      }
+    };
+
+    // Eventos que consideram o usuário "ativo"
+    window.addEventListener('mousemove', updateActivityTimestamp);
+    window.addEventListener('keydown', updateActivityTimestamp);
+    window.addEventListener('click', updateActivityTimestamp);
+    window.addEventListener('touchstart', updateActivityTimestamp);
+    window.addEventListener('scroll', updateActivityTimestamp);
+
+    return () => {
+      window.removeEventListener('mousemove', updateActivityTimestamp);
+      window.removeEventListener('keydown', updateActivityTimestamp);
+      window.removeEventListener('click', updateActivityTimestamp);
+      window.removeEventListener('touchstart', updateActivityTimestamp);
+      window.removeEventListener('scroll', updateActivityTimestamp);
+    };
+  }, [user]);
+
   // Helper to clear potential corrupted auth data
   const clearAuthCache = () => {
     console.warn("Clearing auth cache due to timeout/error...");
     Object.keys(localStorage).forEach(key => {
-      // Remove Supabase specific keys that might be corrupted
       if (key.startsWith('sb-') || key.includes('supabase.auth.token')) {
         localStorage.removeItem(key);
       }
     });
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setCurrentView(ViewState.HOME);
+    localStorage.removeItem('leitura_anual_last_guest_id'); // Limpa sessão de convidado
+    localStorage.removeItem('leitura_anual_last_active'); // Limpa timestamp
+    // Não limpamos o cache do Supabase agressivamente para evitar problemas de re-login, 
+    // apenas removemos a referência local de usuário.
   };
 
   // Auth & Data Loading
@@ -53,22 +88,33 @@ const App: React.FC = () => {
     let mounted = true;
 
     // Safety timeout with Self-Healing
-    // Increased to 20s to allow for Cold Start of Supabase Free Tier
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
         console.warn("Loading timed out (20s). Force releasing UI.");
-        // We do NOT clear cache here anymore to avoid logging out users on slow connections/cold starts
         setLoading(false);
       }
     }, 20000); 
 
     const initSession = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.warn("Session check warning:", error.message);
+      // 1. Verificação de Inatividade
+      const lastActiveStr = localStorage.getItem('leitura_anual_last_active');
+      if (lastActiveStr) {
+        const lastActiveTime = parseInt(lastActiveStr, 10);
+        const now = Date.now();
+        if (now - lastActiveTime > INACTIVITY_LIMIT_MS) {
+          console.log("Sessão expirada por inatividade.");
+          await handleLogout();
+          if (mounted) setLoading(false);
+          return;
         }
+      }
+      
+      // Atualiza timestamp atual já que estamos iniciando
+      localStorage.setItem('leitura_anual_last_active', Date.now().toString());
+
+      try {
+        // 2. Tentar recuperar sessão do Supabase (Online)
+        const { data: { session }, error } = await supabase.auth.getSession();
         
         if (mounted && session) {
           setUser({
@@ -84,11 +130,29 @@ const App: React.FC = () => {
           } catch (progressError) {
             console.error("Error loading progress:", progressError);
           }
+          if (mounted) setLoading(false);
+          return; // Sessão encontrada, encerra aqui
         }
+
+        // 3. Fallback: Tentar recuperar sessão de Convidado (Offline/Local)
+        // Isso resolve o problema de "sair da conta ao recarregar" se estiver em modo convidado
+        const guestId = localStorage.getItem('leitura_anual_last_guest_id');
+        if (mounted && guestId) {
+          console.log("Restaurando sessão de convidado:", guestId);
+          setUser({
+            id: guestId,
+            email: 'convidado@offline',
+            name: 'Visitante',
+            photoUrl: undefined
+          });
+          const data = await loadProgress(guestId);
+          if (mounted) setProgress(data);
+          if (mounted) setLoading(false);
+          return;
+        }
+
       } catch (err) {
         console.error("Unexpected auth initialization error:", err);
-        // Only clear cache on catastrophic error, not timeout
-        clearAuthCache();
       } finally {
         if (mounted) setLoading(false);
         clearTimeout(safetyTimer);
@@ -107,13 +171,13 @@ const App: React.FC = () => {
           name: session.user.user_metadata.name || 'Leitor',
           photoUrl: session.user.user_metadata.avatar_url
         });
+        localStorage.setItem('leitura_anual_last_active', Date.now().toString());
         // Reload progress on auth change
         const data = await loadProgress(session.user.id);
         if (mounted) setProgress(data);
-      } else {
-        setUser(null);
-        setProgress(null);
-      }
+      } 
+      // Não setamos user=null aqui no else imediatamente, pois pode ser uma flutuação de rede.
+      // O initSession cuida do estado inicial.
       setLoading(false);
     });
 
@@ -124,18 +188,11 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setCurrentView(ViewState.HOME);
-    clearAuthCache(); // Ensure clean slate on logout
-  };
-
   const handleUpdateUser = async (updatedUser: User) => {
     // Update local state
     setUser(updatedUser);
     // Update Supabase
-    if (user) {
+    if (user && !user.id.startsWith('guest_')) {
       await supabase.from('profiles').update({ name: updatedUser.name }).eq('id', user.id);
     }
   };
@@ -183,6 +240,7 @@ const App: React.FC = () => {
         photoUrl: session.user.user_metadata.avatar_url
     };
     setUser(currentUser);
+    localStorage.setItem('leitura_anual_last_active', Date.now().toString());
     
     try {
         const data = await loadProgress(session.user.id);
