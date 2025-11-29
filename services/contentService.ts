@@ -1,9 +1,9 @@
-import { DailyEntry } from '../types';
+import { DailyEntry, CustomPlanConfig } from '../types';
 import { MOCK_PLAYLISTS, BIBLE_IMAGES, READING_PLANS } from '../constants';
 import { format, addDays, differenceInCalendarDays, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-// Dados dos livros e quantidade de capítulos
+// ... BIBLE_BOOKS and KEY_VERSES are unchanged ...
 export const BIBLE_BOOKS = [
   { name: "Gênesis", chapters: 50 }, { name: "Êxodo", chapters: 40 }, { name: "Levítico", chapters: 27 },
   { name: "Números", chapters: 36 }, { name: "Deuteronômio", chapters: 34 }, { name: "Josué", chapters: 24 },
@@ -29,8 +29,8 @@ export const BIBLE_BOOKS = [
   { name: "3 João", chapters: 1 }, { name: "Judas", chapters: 1 }, { name: "Apocalipse", chapters: 22 }
 ];
 
-// Versículos Chave por Livro para garantir correspondência correta
 const KEY_VERSES: Record<string, { text: string; ref: string }> = {
+  // ... (keep same content)
   "Gênesis": { text: "No princípio criou Deus o céu e a terra.", ref: "Gênesis 1:1" },
   "Êxodo": { text: "O Senhor pelejará por vós, e vós vos calareis.", ref: "Êxodo 14:14" },
   "Levítico": { text: "Santos sereis, porque eu, o Senhor vosso Deus, sou santo.", ref: "Levítico 19:2" },
@@ -126,7 +126,7 @@ const getBookAndChapterFromList = (cumulativeChapter: number, bookList: typeof B
   let remaining = cumulativeChapter;
   for (const book of bookList) {
     if (remaining <= book.chapters) {
-      return { bookName: book.name, chapter: remaining };
+      return { bookName: book.name, chapter: Math.max(1, remaining) }; // Ensure chapter is at least 1
     }
     remaining -= book.chapters;
   }
@@ -134,17 +134,41 @@ const getBookAndChapterFromList = (cumulativeChapter: number, bookList: typeof B
   return { bookName: lastBook.name, chapter: lastBook.chapters };
 };
 
-export const getEntryForDay = (dayOfPlan: number, startDateStr?: string, planId: string = 'whole_bible'): DailyEntry => {
+export const getEntryForDay = (
+  dayOfPlan: number, 
+  startDateStr?: string, 
+  planId: string = 'whole_bible',
+  customConfig?: CustomPlanConfig
+): DailyEntry => {
   // 1. Determine Plan Config
-  const plan = READING_PLANS.find(p => p.id === planId) || READING_PLANS[0];
-  const maxDays = plan.days;
+  let plan = READING_PLANS.find(p => p.id === planId) || READING_PLANS[0];
+  let maxDays = plan.days;
   
-  // Clamp day
+  // Custom Days Override: Respect duration from config for ALL plans
+  if (customConfig && customConfig.days > 0) {
+    // If explicit custom plan, change label too
+    if (planId === 'custom') {
+        plan = { ...plan, label: `Leitura de ${customConfig.bookName}`, days: customConfig.days };
+    } else {
+        // Just override days for standard plans
+        plan = { ...plan, days: customConfig.days };
+    }
+    maxDays = customConfig.days;
+  } else if (planId === 'custom' && !customConfig) {
+    // Fallback if custom selected but not configured
+    plan = { ...plan, label: 'Plano Personalizado', days: 30 };
+    maxDays = 30;
+  }
+  
+  // Clamp day for content generation, but keep original for date calc
   const safeDay = Math.max(1, Math.min(maxDays, dayOfPlan));
 
   // 2. Filter Books based on Plan
   let activeBooks = BIBLE_BOOKS;
-  if (plan.books.length > 0) {
+  if (planId === 'custom' && customConfig) {
+     activeBooks = BIBLE_BOOKS.filter(b => b.name === customConfig.bookName);
+     if (activeBooks.length === 0) activeBooks = [BIBLE_BOOKS.find(b => b.name === 'Gênesis') || BIBLE_BOOKS[0]]; 
+  } else if (plan.books.length > 0) {
     activeBooks = BIBLE_BOOKS.filter(b => plan.books.includes(b.name));
   }
 
@@ -154,6 +178,9 @@ export const getEntryForDay = (dayOfPlan: number, startDateStr?: string, planId:
   // 4. Calculate Content Range
   // Calculate chapters per day based on THIS plan's length
   const chaptersPerDay = totalChaptersInPlan / maxDays;
+  
+  // Math floor/ceil logic can be tricky at edges. 
+  // We use cumulative tracking.
   const startCumulative = Math.floor((safeDay - 1) * chaptersPerDay) + 1;
   const endCumulative = Math.floor(safeDay * chaptersPerDay);
   
@@ -161,17 +188,23 @@ export const getEntryForDay = (dayOfPlan: number, startDateStr?: string, planId:
   const safeEndCumulative = Math.min(endCumulative, totalChaptersInPlan);
   // Ensure start doesn't exceed total (edge case on last day)
   const safeStartCumulative = Math.min(startCumulative, totalChaptersInPlan);
-  // If calculation makes end < start (rare float issue), fix it
+  
+  // Robustness: ensure end is never less than start due to float precision
   const finalEndCumulative = Math.max(safeEndCumulative, safeStartCumulative);
 
   const startInfo = getBookAndChapterFromList(safeStartCumulative, activeBooks);
-  const endInfo = getBookAndChapterFromList(finalEndCumulative, activeBooks);
+  let endInfo = getBookAndChapterFromList(finalEndCumulative, activeBooks);
+
+  // Robustness check: within the same book, endChapter cannot be smaller than startChapter
+  if (startInfo.bookName === endInfo.bookName && endInfo.chapter < startInfo.chapter) {
+    endInfo = { ...startInfo };
+  }
 
   let chaptersToRead: number[] = [];
   let readingPlanRange = "";
 
   if (startInfo.bookName === endInfo.bookName) {
-    readingPlanRange = `${startInfo.bookName} ${startInfo.chapter}-${endInfo.chapter}`;
+    readingPlanRange = `${startInfo.bookName} ${startInfo.chapter}${endInfo.chapter > startInfo.chapter ? `-${endInfo.chapter}` : ''}`;
     for (let i = startInfo.chapter; i <= endInfo.chapter; i++) {
       chaptersToRead.push(i);
     }

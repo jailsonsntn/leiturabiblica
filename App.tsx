@@ -6,10 +6,10 @@ import { CalendarView } from './components/Views/CalendarView';
 import { StatsView } from './components/Views/StatsView';
 import { LoginView } from './components/Views/LoginView';
 import { SettingsView } from './components/Views/SettingsView';
-import { ViewState, UserProgress, User } from './types';
+import { ViewState, UserProgress, User, CustomPlanConfig } from './types';
 import { READING_PLANS } from './constants';
 import { getEntryForDay, getPlanDayFromDate } from './services/contentService';
-import { loadProgress, toggleDayCompletion, saveDayNote, deleteDayNote, updatePlanStartDate, updateSelectedPlan } from './services/storageService';
+import { loadProgress, toggleDayCompletion, saveDayNote, deleteDayNote, updatePlanStartDate, updateSelectedPlan, updateCustomPlanConfig } from './services/storageService';
 import { supabase } from './services/supabaseClient';
 import { Loader2 } from 'lucide-react';
 
@@ -212,6 +212,79 @@ const App: React.FC = () => {
     setProgress(newProgress);
   };
 
+  // ATOMIC PLAN CHANGE: Handles ID switching, Days updating, and Date resetting in one go
+  const handlePlanChange = async (planId: string, days: number, bookName: string = 'Gênesis') => {
+    if (!progress || !user) return;
+
+    // 1. Prepare new config
+    const newConfig: CustomPlanConfig = {
+      bookName: bookName,
+      days: days
+    };
+
+    // 2. Perform updates sequentially
+    let updatedProgress = await updateCustomPlanConfig(progress, newConfig, user.id);
+    
+    // Reset Date
+    const todayStr = new Date().toISOString().split('T')[0];
+    updatedProgress = await updatePlanStartDate(updatedProgress, todayStr, user.id);
+    
+    // Set ID
+    updatedProgress = await updateSelectedPlan(updatedProgress, planId, user.id);
+
+    // 3. Final State Update
+    setProgress(updatedProgress);
+  };
+
+  const handleUpdateCustomConfig = async (config: CustomPlanConfig) => {
+    if (!progress || !user) return;
+    
+    // ATOMIC UPDATE SEQUENCE
+    // 1. Save configuration and switch context (book) internally in storage service
+    let updatedProgress = await updateCustomPlanConfig(progress, config, user.id);
+    
+    // 2. Reset date to today to prevent "Day X > Total Days" issues
+    const todayStr = new Date().toISOString().split('T')[0];
+    updatedProgress = await updatePlanStartDate(updatedProgress, todayStr, user.id);
+    
+    // 3. Ensure plan is set to custom (or keep standard ID if just overriding duration)
+    // NOTE: If we are just updating duration for 'pentateuch', we don't switch to 'custom'.
+    // The previous logic was forcing 'custom', but now we support overrides.
+    // If the plan is already 'custom', keep it. If not, keep standard ID.
+    const targetPlanId = progress.selectedPlanId;
+    updatedProgress = await updateSelectedPlan(updatedProgress, targetPlanId, user.id);
+
+    // 4. Update State once to prevent race conditions
+    setProgress(updatedProgress);
+  };
+
+  // New function to handle switching context from Calendar/History
+  const handleSelectBookFromHistory = async (bookName: string) => {
+    if (!progress || !user) return;
+
+    // If it's already the current custom plan, just go home
+    if (progress.selectedPlanId === 'custom' && progress.customPlanConfig?.bookName === bookName) {
+      setCurrentView(ViewState.HOME);
+      return;
+    }
+
+    // Otherwise, we need to switch the Custom Config to this book
+    const newConfig: CustomPlanConfig = {
+      bookName: bookName,
+      days: 30 // Default duration for history resumption
+    };
+
+    // When selecting from history, we explicitly switch to 'custom' plan ID because history items are usually custom books
+    // However, if the book belongs to a standard plan, logic might differ, but simpler is to treat as custom view.
+    let updatedProgress = await updateCustomPlanConfig(progress, newConfig, user.id);
+    const todayStr = new Date().toISOString().split('T')[0];
+    updatedProgress = await updatePlanStartDate(updatedProgress, todayStr, user.id);
+    updatedProgress = await updateSelectedPlan(updatedProgress, 'custom', user.id);
+    
+    setProgress(updatedProgress);
+    setCurrentView(ViewState.HOME);
+  };
+
   const handleToggleComplete = async (id: number) => {
     if (!progress || !user) return;
     const newProgress = await toggleDayCompletion(progress, id, user.id);
@@ -266,8 +339,18 @@ const App: React.FC = () => {
   const today = new Date();
   const currentPlanDay = getPlanDayFromDate(today, progress.planStartDate);
   const activePlanId = progress.selectedPlanId || 'whole_bible';
-  const todayEntry = getEntryForDay(currentPlanDay, progress.planStartDate, activePlanId);
-  const currentPlan = READING_PLANS.find(p => p.id === activePlanId) || READING_PLANS[0];
+  
+  // Custom Plan Logic / Duration Override for Total Days
+  let currentPlan = READING_PLANS.find(p => p.id === activePlanId) || READING_PLANS[0];
+  
+  // If we have a custom duration configured, override the plan's default days
+  if (progress.customPlanConfig && progress.customPlanConfig.days > 0) {
+    currentPlan = { ...currentPlan, days: progress.customPlanConfig.days };
+  } else if (activePlanId === 'custom') {
+    currentPlan = { ...currentPlan, days: 30 }; // Default Fallback
+  }
+
+  const todayEntry = getEntryForDay(currentPlanDay, progress.planStartDate, activePlanId, progress.customPlanConfig);
 
   const renderView = () => {
     switch (currentView) {
@@ -284,7 +367,13 @@ const App: React.FC = () => {
           />
         );
       case ViewState.CALENDAR:
-        return <CalendarView progress={progress} totalDays={currentPlan.days} />;
+        return (
+          <CalendarView 
+            progress={progress} 
+            totalDays={currentPlan.days} 
+            onSelectBook={handleSelectBookFromHistory}
+          />
+        );
       case ViewState.STATS:
         return <StatsView progress={progress} totalDays={currentPlan.days} />;
       case ViewState.SETTINGS:
@@ -298,6 +387,8 @@ const App: React.FC = () => {
             progress={progress}
             onUpdatePlanStart={handleUpdatePlanStart}
             onUpdateSelectedPlan={handleUpdateSelectedPlan}
+            onUpdateCustomConfig={handleUpdateCustomConfig}
+            onPlanChange={handlePlanChange}
           />
         );
       default:

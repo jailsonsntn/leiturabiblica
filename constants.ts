@@ -12,13 +12,15 @@ export const COLORS = {
   success: "#10b981"
 };
 
-// Updated to generic Gospel searches as requested
+// Revertido para Busca Genérica (listType=search) para evitar erro de vídeo indisponível
 export const MOCK_PLAYLISTS = [
-  { title: "Melhores Músicas Gospel 2026", url: "https://www.youtube.com/results?search_query=melhores+musicas+gospel+2026" },
-  { title: "Louvor e Adoração Intensa", url: "https://www.youtube.com/results?search_query=louvor+e+adoracao+intensa" },
-  { title: "Hinos Antigos e Atuais", url: "https://www.youtube.com/results?search_query=hinos+gospel+antigos+e+atuais" },
-  { title: "Instrumental para Oração", url: "https://www.youtube.com/results?search_query=fundo+musical+gospel+oracao" },
-  { title: "Worship Gospel Internacional", url: "https://www.youtube.com/results?search_query=worship+gospel+playlist" },
+  { title: "Melhores Músicas Gospel 2026", url: "https://www.youtube.com/results?search_query=melhores+musicas+gospel+2026+mais+tocadas" },
+  { title: "Louvores de Adoração Profunda", url: "https://www.youtube.com/results?search_query=louvores+de+adoracao+profunda" },
+  { title: "Hinos da Harpa Cristã", url: "https://www.youtube.com/results?search_query=hinos+harpa+crista+melhores" },
+  { title: "Gospel Acústico para Orar", url: "https://www.youtube.com/results?search_query=gospel+acustico+para+orar" },
+  { title: "Corinhos de Fogo Pentecostal", url: "https://www.youtube.com/results?search_query=corinhos+de+fogo+pentecostal" },
+  { title: "Fernandinho e Morada", url: "https://www.youtube.com/results?search_query=fernandinho+morada+playlist" },
+  { title: "Gabriela Rocha Worship", url: "https://www.youtube.com/results?search_query=gabriela+rocha+worship" }
 ];
 
 export const BIBLE_IMAGES = [
@@ -69,6 +71,13 @@ export const READING_PLANS: ReadingPlan[] = [
     description: 'Gênesis a Apocalipse em 1 ano (365 dias).',
     days: 365,
     books: [] // Empty implies ALL books
+  },
+  {
+    id: 'custom',
+    label: 'Plano Personalizado',
+    description: 'Escolha um livro e defina seu ritmo.',
+    days: 0, // Dynamic
+    books: [] // Dynamic
   },
   {
     id: 'pentateuch',

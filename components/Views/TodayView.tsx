@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  PlayCircle, CheckCircle, Circle, Share2, 
+  CheckCircle, Circle, Share2, 
   Edit3, Save, BookOpen, Check, Trophy, 
-  Trash2, X, Bold, Italic, List, Clock, Calendar
+  Trash2, X, Bold, Italic, List, Clock, Calendar,
+  ExternalLink, Youtube, Play
 } from 'lucide-react';
 import { DailyEntry, UserProgress } from '../../types';
-import { COLORS } from '../../constants';
 import { PastoralChat } from '../Shared/PastoralChat';
 
 interface TodayViewProps {
@@ -34,27 +34,20 @@ export const TodayView: React.FC<TodayViewProps> = ({
   const [note, setNote] = useState(existingNote);
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   const [checkedChapters, setCheckedChapters] = useState<number[]>([]);
 
   // Pre-start or Post-end check
   const isPreStart = currentPlanDayRaw < 1;
+  const isPostEnd = currentPlanDayRaw > totalPlanDays;
 
   // Sync state when entry changes
-  // Added entry.readingPlanRange to dependencies to ensure reset when plan changes
   useEffect(() => {
     if (isDayCompleted) {
       setCheckedChapters(entry.chaptersToRead);
     } else {
-      // If incomplete, check if we need to reset partial progress
-      // (e.g. if we switched plans, the previous partial checks might be invalid)
-      // For now, we only clear if full (which shouldn't happen if !isDayCompleted, 
-      // but serves as a safety reset) or simply re-initialize empty.
-      // Ideally, we keep local state unless the book/chapters change.
-      
-      // If the current checked chapters don't align with the new entry's chapters 
-      // (e.g. switched from Genesis to Psalms), we should clear them.
       const currentChecksAreValid = checkedChapters.every(c => entry.chaptersToRead.includes(c));
       
       if (!currentChecksAreValid || checkedChapters.length === entry.chaptersToRead.length) {
@@ -64,6 +57,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setNote(progress.notes[entry.id] || '');
     setIsEditingNote(false);
     setShowDeleteConfirm(false);
+    setShareFeedback(false);
   }, [entry.id, isDayCompleted, progress.notes, entry.readingPlanRange, entry.chaptersToRead.length]);
 
   // Adjust textarea height automatically
@@ -86,6 +80,27 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setShowDeleteConfirm(false);
   };
 
+  const handleShare = async () => {
+    const shareText = `Estou lendo ${entry.bookName} no dia ${entry.id} da minha jornada bíblica! 📖✨`;
+    const shareData = {
+      title: 'Leitura Anual',
+      text: shareText,
+      url: window.location.href
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareText}\n${window.location.href}`);
+        setShareFeedback(true);
+        setTimeout(() => setShareFeedback(false), 3000);
+      }
+    } catch (err) {
+      console.log('Error sharing:', err);
+    }
+  };
+
   const insertFormatting = (type: 'bold' | 'italic' | 'list' | 'time') => {
     if (!textareaRef.current) return;
     
@@ -98,14 +113,13 @@ export const TodayView: React.FC<TodayViewProps> = ({
     switch (type) {
       case 'bold':
         newText = text.substring(0, start) + `**${text.substring(start, end)}**` + text.substring(end);
-        newCursorPos = end + 2; // Move after closing **
+        newCursorPos = end + 2; 
         break;
       case 'italic':
         newText = text.substring(0, start) + `_${text.substring(start, end)}_` + text.substring(end);
         newCursorPos = end + 1;
         break;
       case 'list':
-        // Check if we are at start of line
         const isStartOfLine = start === 0 || text[start - 1] === '\n';
         const prefix = isStartOfLine ? '• ' : '\n• ';
         newText = text.substring(0, start) + prefix + text.substring(end);
@@ -120,7 +134,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
     setNote(newText);
     
-    // Need to defer focus/selection set slightly for React render cycle
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
@@ -141,7 +154,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setCheckedChapters(newChecked);
   };
 
-  // UPDATED: Calculate percentage based on actual completed days within current plan
   const validCompletedCount = progress.completedIds.filter(id => id <= totalPlanDays).length;
   const planProgress = Math.min(100, Math.max(0, Math.round((validCompletedCount / totalPlanDays) * 100)));
   const firstName = userName.split(' ')[0];
@@ -162,7 +174,28 @@ export const TodayView: React.FC<TodayViewProps> = ({
          </div>
          <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm w-full max-w-xs">
            <p className="text-xs text-gray-400 uppercase font-bold mb-2">Primeira Leitura</p>
-           <h3 className="font-bold text-lg text-gray-800 dark:text-slate-200">Gênesis 1-3</h3>
+           <h3 className="font-bold text-lg text-gray-800 dark:text-slate-200">Dia 1</h3>
+         </div>
+      </div>
+    );
+  }
+
+  // UI for Post-End (Plan Completed)
+  if (isPostEnd) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center space-y-6 animate-in zoom-in duration-500">
+         <div className="p-6 bg-green-50 dark:bg-green-900/20 rounded-full text-green-500">
+           <Trophy size={64} strokeWidth={1.5} />
+         </div>
+         <div>
+           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Parabéns!</h2>
+           <p className="text-gray-500 dark:text-slate-400 max-w-xs mx-auto">
+             Você concluiu o período do seu plano de leitura atual.
+           </p>
+         </div>
+         <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 shadow-sm w-full max-w-xs">
+           <p className="text-xs text-gray-400 uppercase font-bold mb-2">Progresso Final</p>
+           <h3 className="font-bold text-lg text-gray-800 dark:text-slate-200">{planProgress}% Concluído</h3>
          </div>
       </div>
     );
@@ -170,7 +203,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
   // Normal Flow
   return (
-    <div className="pb-32 animate-in fade-in duration-500 space-y-6">
+    <div className="pb-40 animate-in fade-in duration-500 space-y-6">
       
       {/* 1. Header Personalizado */}
       <div className="flex items-center justify-between px-1 pt-2">
@@ -234,33 +267,37 @@ export const TodayView: React.FC<TodayViewProps> = ({
               <p className="text-sm text-gray-500 dark:text-slate-400 font-medium ml-1">
                 Capítulos para ler:
               </p>
-              <div className="flex flex-wrap gap-3">
-                {entry.chaptersToRead.map((chapter) => {
-                  const isChecked = checkedChapters.includes(chapter);
-                  return (
-                    <button
-                      key={chapter}
-                      onClick={() => toggleChapter(chapter)}
-                      className={`
-                        group relative flex items-center gap-3 pl-4 pr-5 py-3 rounded-xl border-2 transition-all duration-300
-                        ${isChecked 
-                          ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none' 
-                          : 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-blue-200 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-slate-700'
-                        }
-                      `}
-                    >
-                      <div className={`
-                        w-6 h-6 rounded-full border flex items-center justify-center transition-colors
-                        ${isChecked ? 'bg-white border-white' : 'border-gray-300 dark:border-slate-500 group-hover:border-blue-300'}
-                      `}>
-                        {isChecked && <Check size={14} className="text-blue-600" strokeWidth={3} />}
-                      </div>
-                      <span className="text-lg font-bold">
-                        {chapter}
-                      </span>
-                    </button>
-                  );
-                })}
+              
+              {/* Scrollable container to prevent overlap on large chapter counts */}
+              <div className="max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                <div className="flex flex-wrap gap-3">
+                  {entry.chaptersToRead.map((chapter) => {
+                    const isChecked = checkedChapters.includes(chapter);
+                    return (
+                      <button
+                        key={chapter}
+                        onClick={() => toggleChapter(chapter)}
+                        className={`
+                          group relative flex items-center gap-3 pl-4 pr-5 py-3 rounded-xl border-2 transition-all duration-300
+                          ${isChecked 
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none' 
+                            : 'bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-blue-200 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-slate-700'
+                          }
+                        `}
+                      >
+                        <div className={`
+                          w-6 h-6 rounded-full border flex items-center justify-center transition-colors
+                          ${isChecked ? 'bg-white border-white' : 'border-gray-300 dark:border-slate-500 group-hover:border-blue-300'}
+                        `}>
+                          {isChecked && <Check size={14} className="text-blue-600" strokeWidth={3} />}
+                        </div>
+                        <span className="text-lg font-bold">
+                          {chapter}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -326,24 +363,41 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
           <hr className="border-gray-100 dark:border-slate-800" />
 
-          <a 
+          {/* LINK PARA MÚSICA (SEM PLAYER) */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-gray-800 dark:text-white">
+               <Youtube size={16} className="text-red-600" />
+               <h4 className="text-sm font-bold uppercase tracking-wide">Trilha Sonora</h4>
+            </div>
+            
+            <a 
               href={entry.playlistUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors group cursor-pointer border border-gray-100 dark:border-slate-700"
+              className="block group"
             >
-              <div className="bg-white dark:bg-slate-700 p-2 rounded-full shadow-sm text-red-600 group-hover:scale-110 transition-transform">
-                <PlayCircle size={20} className="fill-red-600 text-white dark:text-slate-700" />
+              <div className="rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 p-4 flex items-center justify-between hover:bg-red-50 dark:hover:bg-red-900/10 hover:border-red-100 dark:hover:border-red-900/30 transition-all duration-300">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center text-red-600 dark:text-red-500 group-hover:scale-110 transition-transform">
+                    <Play size={20} fill="currentColor" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors">
+                      {entry.playlistTitle}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-slate-400">
+                      Ouvir no YouTube
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink size={16} className="text-gray-400 group-hover:text-red-500 transition-colors" />
               </div>
-              <div className="flex flex-col overflow-hidden">
-                <span className="text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase">Trilha Sonora</span>
-                <span className="text-sm font-semibold text-gray-800 dark:text-slate-200 truncate">
-                  {entry.playlistTitle}
-                </span>
-              </div>
-          </a>
+            </a>
+          </div>
 
-          {/* EDITOR DE NOTAS APRIMORADO */}
+          <hr className="border-gray-100 dark:border-slate-800" />
+
+          {/* EDITOR DE NOTAS */}
           <div className="bg-yellow-50/50 dark:bg-yellow-900/10 rounded-xl border border-yellow-100 dark:border-yellow-900/20 overflow-hidden transition-all duration-300">
             {isEditingNote ? (
               <div className="flex flex-col">
@@ -439,9 +493,18 @@ export const TodayView: React.FC<TodayViewProps> = ({
       </div>
 
       <div className="mt-4 text-center pb-4">
-        <button className="text-blue-600/60 dark:text-blue-400/60 text-xs font-medium flex items-center justify-center gap-2 mx-auto hover:text-blue-600 dark:hover:text-blue-400 transition-colors py-2 px-4 rounded-full hover:bg-blue-50 dark:hover:bg-slate-800">
-          <Share2 size={14} />
-          Compartilhar Progresso
+        <button 
+          onClick={handleShare}
+          className={`
+            text-xs font-medium flex items-center justify-center gap-2 mx-auto transition-all py-2 px-4 rounded-full 
+            ${shareFeedback 
+              ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' 
+              : 'text-blue-600/60 dark:text-blue-400/60 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800'
+            }
+          `}
+        >
+          {shareFeedback ? <Check size={14} /> : <Share2 size={14} />}
+          {shareFeedback ? 'Copiado!' : 'Compartilhar Progresso'}
         </button>
       </div>
     </div>

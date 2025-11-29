@@ -1,15 +1,18 @@
-import { UserProgress } from '../types';
+
+import { UserProgress, CustomPlanConfig } from '../types';
 import { ACHIEVEMENT_BADGES } from '../constants';
 import { supabase } from './supabaseClient';
 
 const DEFAULT_PROGRESS: UserProgress = {
   completedIds: [],
+  allProgress: {},
   notes: {},
   lastAccessDate: null,
   streak: 0,
   unlockedBadges: [],
   planStartDate: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
-  selectedPlanId: 'whole_bible'
+  selectedPlanId: 'whole_bible',
+  // customPlanConfig defaults to undefined
 };
 
 // --- Helper Functions ---
@@ -26,6 +29,15 @@ const calculateStreak = (completedIds: number[]): number => {
     }
   }
   return currentStreak;
+};
+
+// Generates a unique key for the current plan context
+// e.g. "whole_bible", "custom_Gênesis", "custom_Ester"
+export const getContextKey = (planId: string, customConfig?: CustomPlanConfig): string => {
+  if (planId === 'custom' && customConfig) {
+    return `custom_${customConfig.bookName}`;
+  }
+  return planId;
 };
 
 // Keys for LocalStorage
@@ -85,8 +97,10 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
   // Function to fetch from Supabase
   const fetchFromSupabase = async (): Promise<UserProgress> => {
     const [profileResult, entriesResult, badgesResult] = await Promise.all([
-      supabase.from('profiles').select('plan_start_date, selected_plan_id, streak').eq('id', userId).maybeSingle(),
-      supabase.from('user_daily_entries').select('day_id, completed_at, note').eq('user_id', userId),
+      // Added custom_plan_config to selection
+      supabase.from('profiles').select('plan_start_date, selected_plan_id, streak, custom_plan_config').eq('id', userId).maybeSingle(),
+      // Fetch context_key to separate progress
+      supabase.from('user_daily_entries').select('day_id, completed_at, note, context_key').eq('user_id', userId),
       supabase.from('user_badges').select('badge_id').eq('user_id', userId)
     ]);
 
@@ -94,75 +108,89 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
     const { data: entries } = entriesResult;
     const { data: badges } = badgesResult;
 
-    const completedIds = entries?.filter(e => e.completed_at).map(e => e.day_id) || [];
+    // Process entries into separate contexts
+    const allProgress: Record<string, number[]> = {};
     const notes: Record<number, string> = {};
+
     entries?.forEach(e => {
+      // Handle Notes
       if (e.note) notes[e.day_id] = e.note;
+
+      // Handle Progress Context
+      // If context_key is missing (legacy data), assume 'whole_bible' or current plan
+      const ctx = e.context_key || 'whole_bible';
+      
+      if (e.completed_at) {
+        if (!allProgress[ctx]) allProgress[ctx] = [];
+        allProgress[ctx].push(e.day_id);
+      }
     });
+
     const unlockedBadges = badges?.map(b => b.badge_id) || [];
+
+    // Prioritize SQL data for custom plan, fallback to local cache or local storage backup
+    let customPlanConfig = profile?.custom_plan_config;
+    
+    if (!customPlanConfig && localData?.customPlanConfig) {
+        customPlanConfig = localData.customPlanConfig;
+    }
+    
+    if (!customPlanConfig && localStorage.getItem(`custom_plan_${userId}`)) {
+       try {
+         customPlanConfig = JSON.parse(localStorage.getItem(`custom_plan_${userId}`) || '{}');
+       } catch (e) {}
+    }
+
+    // Determine current active context
+    const selectedPlanId = profile?.selected_plan_id || DEFAULT_PROGRESS.selectedPlanId;
+    const currentContextKey = getContextKey(selectedPlanId, customPlanConfig);
+    const completedIds = allProgress[currentContextKey] || [];
 
     return {
       completedIds,
+      allProgress,
       notes,
       lastAccessDate: new Date().toISOString(),
       streak: profile?.streak || calculateStreak(completedIds),
       unlockedBadges,
       planStartDate: profile?.plan_start_date || DEFAULT_PROGRESS.planStartDate,
-      selectedPlanId: profile?.selected_plan_id || DEFAULT_PROGRESS.selectedPlanId
+      selectedPlanId,
+      customPlanConfig
     };
   };
 
   try {
-    // RACE: Try to get data from server within 2 seconds. 
-    // If it's slow (Cold Start), fall back to local data immediately to prevent blocking UI.
-    // If no local data exists, we MUST wait for server (or return default).
-    
     if (localData) {
-      // We have local data. Race server vs timeout.
       try {
         const serverData = await Promise.race([
           fetchFromSupabase(),
-          timeoutPromise(2000) // 2s timeout for "Instant" feel
+          timeoutPromise(3000) // 3s timeout
         ]) as UserProgress;
         
-        // Server won and was fast. Update cache and return.
         localStorage.setItem(cacheKey, JSON.stringify(serverData));
         return serverData;
       } catch (err) {
-        // Timeout or Error. Return local data immediately.
-        // But kick off a background sync to update cache later? 
-        // For simplicity in this architecture, we just return local data now.
-        // The next action user takes will trigger a sync.
         console.log("Server slow/offline. Using local cache.");
-        
-        // Optionally trigger background refresh
         runBackgroundSync(async () => {
            try {
              const fresh = await fetchFromSupabase();
              localStorage.setItem(cacheKey, JSON.stringify(fresh));
            } catch(e) { console.error("Background refresh failed", e); }
         });
-
         return localData;
       }
     } else {
-      // No local data (First login on this device). Must wait for server.
       const serverData = await fetchFromSupabase();
       localStorage.setItem(cacheKey, JSON.stringify(serverData));
       return serverData;
     }
-
   } catch (e) {
     console.error("Failed to load progress from Supabase", e);
-    // Ultimate fallback
     return localData || DEFAULT_PROGRESS;
   }
 };
 
-// --- Update Functions (Dual Write: Local + Background Remote) ---
-
 const persistDual = (userId: string, data: UserProgress) => {
-  // 1. Local Write
   if (userId.startsWith('guest_')) {
     localStorage.setItem(getGuestKey(userId), JSON.stringify(data));
   } else {
@@ -186,6 +214,11 @@ export const updatePlanStartDate = async (currentProgress: UserProgress, newDate
 
 export const updateSelectedPlan = async (currentProgress: UserProgress, planId: string, userId: string): Promise<UserProgress> => {
   const newProgress = { ...currentProgress, selectedPlanId: planId };
+  
+  // Switch visual progress to new plan context
+  const newContextKey = getContextKey(planId, currentProgress.customPlanConfig);
+  newProgress.completedIds = currentProgress.allProgress[newContextKey] || [];
+
   persistDual(userId, newProgress);
 
   if (!userId.startsWith('guest_')) {
@@ -198,7 +231,31 @@ export const updateSelectedPlan = async (currentProgress: UserProgress, planId: 
   return newProgress;
 };
 
+export const updateCustomPlanConfig = async (currentProgress: UserProgress, config: CustomPlanConfig, userId: string): Promise<UserProgress> => {
+  const newProgress = { ...currentProgress, customPlanConfig: config };
+  
+  // IMPORTANT: Switch visual progress to new BOOK context
+  // e.g. switching from custom_Gênesis to custom_Ester
+  const newContextKey = getContextKey('custom', config);
+  newProgress.completedIds = currentProgress.allProgress[newContextKey] || [];
+
+  persistDual(userId, newProgress);
+  
+  localStorage.setItem(`custom_plan_${userId}`, JSON.stringify(config));
+
+  if (!userId.startsWith('guest_')) {
+    runBackgroundSync(async () => {
+      await ensureProfileExists(userId);
+      await supabase.from('profiles').update({ custom_plan_config: config }).eq('id', userId);
+    });
+  }
+  
+  return newProgress;
+};
+
 export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: number, userId: string): Promise<UserProgress> => {
+  const currentContextKey = getContextKey(currentProgress.selectedPlanId, currentProgress.customPlanConfig);
+  
   const isCompleted = currentProgress.completedIds.includes(dayId);
   let newCompletedIds: number[];
   
@@ -207,6 +264,10 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
   } else {
     newCompletedIds = [...currentProgress.completedIds, dayId];
   }
+
+  // Update All Progress Map
+  const newAllProgress = { ...currentProgress.allProgress };
+  newAllProgress[currentContextKey] = newCompletedIds;
 
   const newStreak = calculateStreak(newCompletedIds);
   const newUnlockedBadges = [...currentProgress.unlockedBadges];
@@ -222,6 +283,7 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
   const updatedProgress = {
     ...currentProgress,
     completedIds: newCompletedIds,
+    allProgress: newAllProgress,
     streak: newStreak,
     unlockedBadges: newUnlockedBadges
   };
@@ -236,13 +298,15 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
         await supabase.from('user_daily_entries')
           .update({ completed_at: null })
           .eq('user_id', userId)
-          .eq('day_id', dayId);
+          .eq('day_id', dayId)
+          .eq('context_key', currentContextKey); // Specific context delete
       } else {
         await supabase.from('user_daily_entries').upsert({
           user_id: userId,
           day_id: dayId,
+          context_key: currentContextKey, // Save with context
           completed_at: new Date().toISOString()
-        }, { onConflict: 'user_id, day_id' });
+        }, { onConflict: 'user_id, day_id, context_key' }); // Ensure unique index exists in DB
       }
 
       await supabase.from('profiles').upsert({ id: userId, streak: newStreak }, { onConflict: 'id' });
@@ -260,6 +324,8 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
 };
 
 export const saveDayNote = async (currentProgress: UserProgress, dayId: number, note: string, userId: string): Promise<UserProgress> => {
+  const currentContextKey = getContextKey(currentProgress.selectedPlanId, currentProgress.customPlanConfig);
+  
   const newProgress = {
     ...currentProgress,
     notes: {
@@ -273,13 +339,21 @@ export const saveDayNote = async (currentProgress: UserProgress, dayId: number, 
   if (!userId.startsWith('guest_')) {
     runBackgroundSync(async () => {
       await ensureProfileExists(userId);
-      const { data: existing } = await supabase.from('user_daily_entries').select('completed_at').eq('user_id', userId).eq('day_id', dayId).maybeSingle();
+      // Notes are loosely coupled to context for now, but we save context_key just in case
+      const { data: existing } = await supabase.from('user_daily_entries')
+        .select('completed_at')
+        .eq('user_id', userId)
+        .eq('day_id', dayId)
+        .eq('context_key', currentContextKey)
+        .maybeSingle();
+        
       await supabase.from('user_daily_entries').upsert({
         user_id: userId,
         day_id: dayId,
+        context_key: currentContextKey,
         note: note,
         completed_at: existing?.completed_at || null 
-      }, { onConflict: 'user_id, day_id' });
+      }, { onConflict: 'user_id, day_id, context_key' });
     });
   }
 
@@ -287,6 +361,8 @@ export const saveDayNote = async (currentProgress: UserProgress, dayId: number, 
 };
 
 export const deleteDayNote = async (currentProgress: UserProgress, dayId: number, userId: string): Promise<UserProgress> => {
+  const currentContextKey = getContextKey(currentProgress.selectedPlanId, currentProgress.customPlanConfig);
+  
   const newNotes = { ...currentProgress.notes };
   delete newNotes[dayId];
   const newProgress = { ...currentProgress, notes: newNotes };
@@ -296,13 +372,20 @@ export const deleteDayNote = async (currentProgress: UserProgress, dayId: number
   if (!userId.startsWith('guest_')) {
     runBackgroundSync(async () => {
       await ensureProfileExists(userId);
-      const { data: existing } = await supabase.from('user_daily_entries').select('completed_at').eq('user_id', userId).eq('day_id', dayId).maybeSingle();
+      const { data: existing } = await supabase.from('user_daily_entries')
+        .select('completed_at')
+        .eq('user_id', userId)
+        .eq('day_id', dayId)
+        .eq('context_key', currentContextKey)
+        .maybeSingle();
+        
       await supabase.from('user_daily_entries').upsert({
         user_id: userId,
         day_id: dayId,
+        context_key: currentContextKey,
         note: null,
         completed_at: existing?.completed_at || null
-      }, { onConflict: 'user_id, day_id' });
+      }, { onConflict: 'user_id, day_id, context_key' });
     });
   }
 

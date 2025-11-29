@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserProgress } from '../../types';
+import { User, UserProgress, CustomPlanConfig } from '../../types';
 import { READING_PLANS } from '../../constants';
+import { BIBLE_BOOKS } from '../../services/contentService'; // Need access to book list
 import { 
   User as UserIcon, 
   Mail, 
@@ -13,7 +14,8 @@ import {
   Moon,
   Sun,
   Calendar,
-  Book
+  Book,
+  Clock
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -25,6 +27,8 @@ interface SettingsViewProps {
   progress: UserProgress;
   onUpdatePlanStart: (date: string) => void;
   onUpdateSelectedPlan: (planId: string) => void;
+  onUpdateCustomConfig: (config: CustomPlanConfig) => Promise<void>;
+  onPlanChange: (planId: string, days: number, bookName?: string) => Promise<void>;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ 
@@ -35,21 +39,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   toggleTheme,
   progress,
   onUpdatePlanStart,
-  onUpdateSelectedPlan
+  onUpdateSelectedPlan,
+  onUpdateCustomConfig,
+  onPlanChange
 }) => {
   const [name, setName] = useState(user.name);
   const [notificationTime, setNotificationTime] = useState('07:00');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
-  // Load notification settings from storage on mount
+  // Custom Plan States
+  const [customBook, setCustomBook] = useState('Gênesis');
+  const [customDays, setCustomDays] = useState(30);
+
+  // Load settings from props on mount or when progress changes
   useEffect(() => {
     const savedTime = localStorage.getItem('leitura_anual_notif_time');
     const savedEnabled = localStorage.getItem('leitura_anual_notif_enabled') === 'true';
     
     if (savedTime) setNotificationTime(savedTime);
     
-    // Check actual browser permission status to sync UI
+    // Sync local state with global progress
+    if (progress.customPlanConfig) {
+      setCustomBook(progress.customPlanConfig.bookName);
+      setCustomDays(progress.customPlanConfig.days);
+    } else {
+      // Fallback: If no custom config exists yet, assume default days for current plan
+      const currentPlan = READING_PLANS.find(p => p.id === progress.selectedPlanId);
+      if (currentPlan) {
+        setCustomDays(currentPlan.days || 30);
+      }
+    }
+
     if ('Notification' in window) {
       if (Notification.permission === 'granted' && savedEnabled) {
         setNotificationsEnabled(true);
@@ -57,10 +78,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         setNotificationsEnabled(false);
       }
     }
-  }, []);
+  }, [progress.customPlanConfig, progress.selectedPlanId]); 
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
+    // 1. Update user name
     onUpdateUser({ ...user, name });
+
+    // 2. Save Plan Config (Apply duration override for ANY plan)
+    const config: CustomPlanConfig = {
+      bookName: customBook, // Used if plan is 'custom', ignored otherwise
+      days: parseInt(customDays.toString(), 10) || 30
+    };
+    
+    // Update config using the atomic handler passed from App
+    await onUpdateCustomConfig(config);
+
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
   };
@@ -78,29 +110,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
 
     if (!notificationsEnabled) {
-      // Turning ON
       const permission = await Notification.requestPermission();
       
       if (permission === 'granted') {
         setNotificationsEnabled(true);
         localStorage.setItem('leitura_anual_notif_enabled', 'true');
-        
-        // Send test notification
         try {
           new Notification("Leitura Anual", {
             body: `Lembretes ativados para às ${notificationTime}.`,
-            icon: '/icon.png' // Fallback icon path
+            icon: '/icon.png' 
           });
-        } catch (error) {
-          console.log("Notificação enviada (simulada)");
-        }
+        } catch (error) {}
       } else if (permission === 'denied') {
-        alert("As notificações estão bloqueadas nas configurações do seu navegador/celular. Por favor, habilite manualmente para receber os lembretes.");
+        alert("As notificações estão bloqueadas nas configurações do seu navegador/celular.");
         setNotificationsEnabled(false);
         localStorage.setItem('leitura_anual_notif_enabled', 'false');
       }
     } else {
-      // Turning OFF
       setNotificationsEnabled(false);
       localStorage.setItem('leitura_anual_notif_enabled', 'false');
     }
@@ -164,7 +190,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* Plan Settings - Updated */}
+      {/* Plan Settings */}
       <div className="space-y-3">
         <h3 className="font-bold text-gray-700 dark:text-slate-300 px-2">Configuração do Plano</h3>
         
@@ -185,15 +211,62 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <select 
                 value={progress.selectedPlanId || 'whole_bible'}
-                onChange={(e) => onUpdateSelectedPlan(e.target.value)}
+                onChange={(e) => {
+                  const newPlanId = e.target.value;
+                  const newPlan = READING_PLANS.find(p => p.id === newPlanId);
+                  
+                  // Use atomic handler from App.tsx
+                  if (newPlan) {
+                    const defaultDays = newPlan.days || 30;
+                    // Force update local state immediately for visual feedback
+                    setCustomDays(defaultDays); 
+                    // Call atomic update
+                    onPlanChange(newPlanId, defaultDays, customBook);
+                  }
+                }}
                 className="w-full bg-gray-50 dark:bg-slate-800 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg px-3 py-3 text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none"
               >
                 {READING_PLANS.map(plan => (
                   <option key={plan.id} value={plan.id}>
-                    {plan.label} ({plan.days} dias)
+                    {plan.label} {plan.id !== 'custom' && `(${plan.days} dias)`}
                   </option>
                 ))}
               </select>
+           </div>
+
+           {/* Seleção de Livro (Apenas para Customizado) */}
+           {progress.selectedPlanId === 'custom' && (
+             <div className="p-4 border-b border-gray-50 dark:border-slate-800 bg-blue-50/50 dark:bg-slate-800/50 animate-in slide-in-from-top-2">
+               <label className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Livro</label>
+               <select 
+                  value={customBook}
+                  onChange={(e) => setCustomBook(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm"
+               >
+                 {BIBLE_BOOKS.map(book => (
+                   <option key={book.name} value={book.name}>{book.name} ({book.chapters} caps)</option>
+                 ))}
+               </select>
+             </div>
+           )}
+
+           {/* Configuração de Duração (Para TODOS os planos) */}
+           <div className="p-4 border-b border-gray-50 dark:border-slate-800 animate-in slide-in-from-top-2">
+             <div className="flex items-center gap-2 mb-1">
+               <Clock size={14} className="text-gray-400" />
+               <label className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase">Duração (Dias)</label>
+             </div>
+             <input 
+               type="number"
+               min="1"
+               max="365"
+               value={customDays}
+               onChange={(e) => setCustomDays(parseInt(e.target.value))}
+               className="w-full bg-white dark:bg-slate-900 text-gray-800 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm"
+             />
+             <p className="text-[10px] text-gray-400 mt-1">
+               Você pode personalizar o tempo de leitura deste plano.
+             </p>
            </div>
 
            {/* Data de Início */}
@@ -220,7 +293,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
            <div className="bg-yellow-50 dark:bg-yellow-900/10 p-3 flex gap-2">
              <div className="min-w-[4px] bg-yellow-400 rounded-full" />
              <p className="text-[10px] text-yellow-700 dark:text-yellow-500 leading-tight">
-               As alterações no plano são salvas automaticamente. Seu progresso marcado (check) é mantido por número de dia (ex: Dia 1), mas o conteúdo mudará se trocar de plano.
+               Ao mudar o plano, a data de início é redefinida para hoje.
+               <br/>
+               <span className="font-bold">* Clique em "Salvar Perfil" para aplicar as alterações de duração.</span>
              </p>
            </div>
         </div>
@@ -315,7 +390,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       <p className="text-center text-xs text-gray-400 dark:text-slate-600 pt-4">
-        Leitura Anual v1.3.1 (Planos Bíblicos)
+        Leitura Anual v1.6.5
       </p>
 
     </div>
