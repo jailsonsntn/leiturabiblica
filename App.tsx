@@ -47,7 +47,6 @@ const App: React.FC = () => {
       }
     };
 
-    // Eventos que consideram o usuário "ativo"
     window.addEventListener('mousemove', updateActivityTimestamp);
     window.addEventListener('keydown', updateActivityTimestamp);
     window.addEventListener('click', updateActivityTimestamp);
@@ -63,11 +62,12 @@ const App: React.FC = () => {
     };
   }, [user]);
 
-  // Helper to clear potential corrupted auth data
+  // Helper to clear corrupted auth data specifically
   const clearAuthCache = () => {
-    console.warn("Clearing auth cache due to timeout/error...");
+    console.warn("Performing selective cache cleanup...");
+    // Only remove supabase tokens that might be bloated
     Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('sb-') || key.includes('supabase.auth.token')) {
+      if (key.includes('supabase.auth.token')) {
         localStorage.removeItem(key);
       }
     });
@@ -77,43 +77,46 @@ const App: React.FC = () => {
     await supabase.auth.signOut();
     setUser(null);
     setCurrentView(ViewState.HOME);
-    localStorage.removeItem('leitura_anual_last_guest_id'); // Limpa sessão de convidado
-    localStorage.removeItem('leitura_anual_last_active'); // Limpa timestamp
-    // Não limpamos o cache do Supabase agressivamente para evitar problemas de re-login, 
-    // apenas removemos a referência local de usuário.
+    localStorage.removeItem('leitura_anual_last_guest_id'); 
+    localStorage.removeItem('leitura_anual_last_active');
   };
 
   // Auth & Data Loading
   useEffect(() => {
     let mounted = true;
 
-    // Safety timeout with Self-Healing
+    // Safety timeout - Self-healing if things get stuck
     const safetyTimer = setTimeout(() => {
       if (mounted && loading) {
-        console.warn("Loading timed out (20s). Force releasing UI.");
-        setLoading(false);
+        console.warn("Initial load timeout (20s). Checking state...");
+        
+        // If we have a user but loading is stuck, just release the UI
+        if (user) {
+          setLoading(false);
+        } else {
+          // If no user and stuck, maybe cache is corrupt. Try to clear and reset.
+          // clearAuthCache(); // Don't aggressive clear, just stop loading
+          setLoading(false); 
+        }
       }
     }, 20000); 
 
     const initSession = async () => {
-      // 1. Verificação de Inatividade
       const lastActiveStr = localStorage.getItem('leitura_anual_last_active');
       if (lastActiveStr) {
         const lastActiveTime = parseInt(lastActiveStr, 10);
         const now = Date.now();
         if (now - lastActiveTime > INACTIVITY_LIMIT_MS) {
-          console.log("Sessão expirada por inatividade.");
+          console.log("Session expired due to inactivity.");
           await handleLogout();
           if (mounted) setLoading(false);
           return;
         }
       }
-      
-      // Atualiza timestamp atual já que estamos iniciando
       localStorage.setItem('leitura_anual_last_active', Date.now().toString());
 
       try {
-        // 2. Tentar recuperar sessão do Supabase (Online)
+        // 1. Supabase Session Check
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (mounted && session) {
@@ -124,6 +127,7 @@ const App: React.FC = () => {
             photoUrl: session.user.user_metadata.avatar_url
           });
           
+          // Now using the optimized local-first loadProgress
           try {
             const data = await loadProgress(session.user.id);
             if (mounted) setProgress(data);
@@ -131,14 +135,12 @@ const App: React.FC = () => {
             console.error("Error loading progress:", progressError);
           }
           if (mounted) setLoading(false);
-          return; // Sessão encontrada, encerra aqui
+          return; 
         }
 
-        // 3. Fallback: Tentar recuperar sessão de Convidado (Offline/Local)
-        // Isso resolve o problema de "sair da conta ao recarregar" se estiver em modo convidado
+        // 2. Guest Session Check
         const guestId = localStorage.getItem('leitura_anual_last_guest_id');
         if (mounted && guestId) {
-          console.log("Restaurando sessão de convidado:", guestId);
           setUser({
             id: guestId,
             email: 'convidado@offline',
@@ -152,7 +154,11 @@ const App: React.FC = () => {
         }
 
       } catch (err) {
-        console.error("Unexpected auth initialization error:", err);
+        console.error("Auth init error:", err);
+        // If there is a critical JSON error in localstorage (the 2KB issue), clear it
+        if (err instanceof Error && err.name === 'SyntaxError') {
+          clearAuthCache();
+        }
       } finally {
         if (mounted) setLoading(false);
         clearTimeout(safetyTimer);
@@ -172,12 +178,11 @@ const App: React.FC = () => {
           photoUrl: session.user.user_metadata.avatar_url
         });
         localStorage.setItem('leitura_anual_last_active', Date.now().toString());
-        // Reload progress on auth change
+        
         const data = await loadProgress(session.user.id);
         if (mounted) setProgress(data);
       } 
-      // Não setamos user=null aqui no else imediatamente, pois pode ser uma flutuação de rede.
-      // O initSession cuida do estado inicial.
+      
       setLoading(false);
     });
 
@@ -189,9 +194,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleUpdateUser = async (updatedUser: User) => {
-    // Update local state
     setUser(updatedUser);
-    // Update Supabase
     if (user && !user.id.startsWith('guest_')) {
       await supabase.from('profiles').update({ name: updatedUser.name }).eq('id', user.id);
     }
@@ -199,28 +202,24 @@ const App: React.FC = () => {
 
   const handleUpdatePlanStart = async (newDate: string) => {
     if (!progress || !user) return;
-    // Optimistic Update: Service now returns updated state immediately
     const newProgress = await updatePlanStartDate(progress, newDate, user.id);
     setProgress(newProgress);
   };
 
   const handleUpdateSelectedPlan = async (planId: string) => {
     if (!progress || !user) return;
-    // Optimistic Update
     const newProgress = await updateSelectedPlan(progress, planId, user.id);
     setProgress(newProgress);
   };
 
   const handleToggleComplete = async (id: number) => {
     if (!progress || !user) return;
-    // Optimistic Update: Button feels instant now
     const newProgress = await toggleDayCompletion(progress, id, user.id);
     setProgress(newProgress);
   };
 
   const handleSaveNote = async (id: number, note: string) => {
     if (!progress || !user) return;
-    
     let newProgress;
     if (!note) {
       newProgress = await deleteDayNote(progress, id, user.id);
@@ -230,7 +229,6 @@ const App: React.FC = () => {
     setProgress(newProgress);
   };
 
-  // Explicit handler to react immediately to LoginView success
   const handleLogin = async (session: any) => {
     setLoading(true);
     const currentUser = {
@@ -265,10 +263,8 @@ const App: React.FC = () => {
     return <LoginView onLogin={handleLogin} />;
   }
 
-  // Calculate the plan day
   const today = new Date();
   const currentPlanDay = getPlanDayFromDate(today, progress.planStartDate);
-  
   const activePlanId = progress.selectedPlanId || 'whole_bible';
   const todayEntry = getEntryForDay(currentPlanDay, progress.planStartDate, activePlanId);
   const currentPlan = READING_PLANS.find(p => p.id === activePlanId) || READING_PLANS[0];
@@ -311,11 +307,9 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F7FAFB] text-slate-800 dark:bg-slate-950 dark:text-slate-200 font-sans selection:bg-blue-100 dark:selection:bg-blue-900 transition-colors duration-300">
       <Header />
-      
       <main className="max-w-md mx-auto px-6 pt-6">
         {renderView()}
       </main>
-
       <BottomNav currentView={currentView} setView={setCurrentView} />
     </div>
   );

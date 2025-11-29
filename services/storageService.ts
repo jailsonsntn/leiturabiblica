@@ -28,20 +28,22 @@ const calculateStreak = (completedIds: number[]): number => {
   return currentStreak;
 };
 
+// Keys for LocalStorage
 const getGuestKey = (userId: string) => `leitura_anual_guest_${userId}`;
+const getAuthCacheKey = (userId: string) => `leitura_anual_auth_cache_${userId}`;
 
 // Helper for fire-and-forget background synchronization
-// This ensures the UI doesn't wait for the network
 const runBackgroundSync = (syncFn: () => Promise<void>) => {
   syncFn().catch(err => console.error("Background sync error:", err));
 };
 
+// Helper: Timeout promise
+const timeoutPromise = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms));
+
 // Robustness helper: Ensure profile exists before adding entries
-// This handles cases where the signup trigger might have failed or lagged
 const ensureProfileExists = async (userId: string) => {
   const { data } = await supabase.from('profiles').select('id').eq('id', userId).maybeSingle();
   if (!data) {
-     // Create a skeleton profile if missing
      await supabase.from('profiles').upsert({ 
        id: userId, 
        updated_at: new Date().toISOString()
@@ -66,9 +68,22 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
     }
   }
 
-  // 2. SERVER MODE (SUPABASE)
+  // 2. AUTHENTICATED USER (LOCAL-FIRST HYBRID)
+  const cacheKey = getAuthCacheKey(userId);
+  let localData: UserProgress | null = null;
+  
+  // Try load from local cache first
   try {
-    // Parallel loading for speed
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      localData = JSON.parse(cached);
+    }
+  } catch (e) {
+    console.warn("Error reading local auth cache", e);
+  }
+
+  // Function to fetch from Supabase
+  const fetchFromSupabase = async (): Promise<UserProgress> => {
     const [profileResult, entriesResult, badgesResult] = await Promise.all([
       supabase.from('profiles').select('plan_start_date, selected_plan_id, streak').eq('id', userId).maybeSingle(),
       supabase.from('user_daily_entries').select('day_id, completed_at, note').eq('user_id', userId),
@@ -95,52 +110,95 @@ export const loadProgress = async (userId: string): Promise<UserProgress> => {
       planStartDate: profile?.plan_start_date || DEFAULT_PROGRESS.planStartDate,
       selectedPlanId: profile?.selected_plan_id || DEFAULT_PROGRESS.selectedPlanId
     };
+  };
+
+  try {
+    // RACE: Try to get data from server within 2 seconds. 
+    // If it's slow (Cold Start), fall back to local data immediately to prevent blocking UI.
+    // If no local data exists, we MUST wait for server (or return default).
+    
+    if (localData) {
+      // We have local data. Race server vs timeout.
+      try {
+        const serverData = await Promise.race([
+          fetchFromSupabase(),
+          timeoutPromise(2000) // 2s timeout for "Instant" feel
+        ]) as UserProgress;
+        
+        // Server won and was fast. Update cache and return.
+        localStorage.setItem(cacheKey, JSON.stringify(serverData));
+        return serverData;
+      } catch (err) {
+        // Timeout or Error. Return local data immediately.
+        // But kick off a background sync to update cache later? 
+        // For simplicity in this architecture, we just return local data now.
+        // The next action user takes will trigger a sync.
+        console.log("Server slow/offline. Using local cache.");
+        
+        // Optionally trigger background refresh
+        runBackgroundSync(async () => {
+           try {
+             const fresh = await fetchFromSupabase();
+             localStorage.setItem(cacheKey, JSON.stringify(fresh));
+           } catch(e) { console.error("Background refresh failed", e); }
+        });
+
+        return localData;
+      }
+    } else {
+      // No local data (First login on this device). Must wait for server.
+      const serverData = await fetchFromSupabase();
+      localStorage.setItem(cacheKey, JSON.stringify(serverData));
+      return serverData;
+    }
 
   } catch (e) {
     console.error("Failed to load progress from Supabase", e);
-    // Fallback to default if load fails, preventing crash
-    return DEFAULT_PROGRESS;
+    // Ultimate fallback
+    return localData || DEFAULT_PROGRESS;
+  }
+};
+
+// --- Update Functions (Dual Write: Local + Background Remote) ---
+
+const persistDual = (userId: string, data: UserProgress) => {
+  // 1. Local Write
+  if (userId.startsWith('guest_')) {
+    localStorage.setItem(getGuestKey(userId), JSON.stringify(data));
+  } else {
+    localStorage.setItem(getAuthCacheKey(userId), JSON.stringify(data));
   }
 };
 
 export const updatePlanStartDate = async (currentProgress: UserProgress, newDate: string, userId: string): Promise<UserProgress> => {
-  // Optimistic update
   const newProgress = { ...currentProgress, planStartDate: newDate };
-  
-  if (userId.startsWith('guest_')) {
-    localStorage.setItem(getGuestKey(userId), JSON.stringify(newProgress));
-    return newProgress;
-  }
+  persistDual(userId, newProgress);
 
-  // Background Sync
-  runBackgroundSync(async () => {
-    await ensureProfileExists(userId);
-    await supabase.from('profiles').upsert({ id: userId, plan_start_date: newDate }, { onConflict: 'id' });
-  });
+  if (!userId.startsWith('guest_')) {
+    runBackgroundSync(async () => {
+      await ensureProfileExists(userId);
+      await supabase.from('profiles').upsert({ id: userId, plan_start_date: newDate }, { onConflict: 'id' });
+    });
+  }
 
   return newProgress;
 };
 
 export const updateSelectedPlan = async (currentProgress: UserProgress, planId: string, userId: string): Promise<UserProgress> => {
-  // Optimistic update
   const newProgress = { ...currentProgress, selectedPlanId: planId };
-  
-  if (userId.startsWith('guest_')) {
-    localStorage.setItem(getGuestKey(userId), JSON.stringify(newProgress));
-    return newProgress;
-  }
+  persistDual(userId, newProgress);
 
-  // Background Sync
-  runBackgroundSync(async () => {
-    await ensureProfileExists(userId);
-    await supabase.from('profiles').upsert({ id: userId, selected_plan_id: planId }, { onConflict: 'id' });
-  });
+  if (!userId.startsWith('guest_')) {
+    runBackgroundSync(async () => {
+      await ensureProfileExists(userId);
+      await supabase.from('profiles').upsert({ id: userId, selected_plan_id: planId }, { onConflict: 'id' });
+    });
+  }
 
   return newProgress;
 };
 
 export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: number, userId: string): Promise<UserProgress> => {
-  // 1. Calculate new state locally
   const isCompleted = currentProgress.completedIds.includes(dayId);
   let newCompletedIds: number[];
   
@@ -151,7 +209,6 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
   }
 
   const newStreak = calculateStreak(newCompletedIds);
-  
   const newUnlockedBadges = [...currentProgress.unlockedBadges];
   const badgesToInsert: string[] = [];
 
@@ -169,49 +226,40 @@ export const toggleDayCompletion = async (currentProgress: UserProgress, dayId: 
     unlockedBadges: newUnlockedBadges
   };
 
-  // 2. Persist Guest Mode
-  if (userId.startsWith('guest_')) {
-    localStorage.setItem(getGuestKey(userId), JSON.stringify(updatedProgress));
-    return updatedProgress;
+  persistDual(userId, updatedProgress);
+
+  if (!userId.startsWith('guest_')) {
+    runBackgroundSync(async () => {
+      await ensureProfileExists(userId);
+
+      if (isCompleted) {
+        await supabase.from('user_daily_entries')
+          .update({ completed_at: null })
+          .eq('user_id', userId)
+          .eq('day_id', dayId);
+      } else {
+        await supabase.from('user_daily_entries').upsert({
+          user_id: userId,
+          day_id: dayId,
+          completed_at: new Date().toISOString()
+        }, { onConflict: 'user_id, day_id' });
+      }
+
+      await supabase.from('profiles').upsert({ id: userId, streak: newStreak }, { onConflict: 'id' });
+
+      if (badgesToInsert.length > 0) {
+        await supabase.from('user_badges').upsert(
+          badgesToInsert.map(bid => ({ user_id: userId, badge_id: bid })),
+          { onConflict: 'user_id, badge_id' }
+        );
+      }
+    });
   }
 
-  // 3. Background Sync (Server Mode)
-  runBackgroundSync(async () => {
-    await ensureProfileExists(userId);
-
-    if (isCompleted) {
-      // Unmarking: use update to set null
-      await supabase.from('user_daily_entries')
-        .update({ completed_at: null })
-        .eq('user_id', userId)
-        .eq('day_id', dayId);
-    } else {
-      // Marking: use upsert
-      await supabase.from('user_daily_entries').upsert({
-        user_id: userId,
-        day_id: dayId,
-        completed_at: new Date().toISOString()
-      }, { onConflict: 'user_id, day_id' });
-    }
-
-    // Update profile stats
-    await supabase.from('profiles').upsert({ id: userId, streak: newStreak }, { onConflict: 'id' });
-
-    // Insert new badges
-    if (badgesToInsert.length > 0) {
-      await supabase.from('user_badges').upsert(
-        badgesToInsert.map(bid => ({ user_id: userId, badge_id: bid })),
-        { onConflict: 'user_id, badge_id' }
-      );
-    }
-  });
-
-  // Return immediately for instant UI update
   return updatedProgress;
 };
 
 export const saveDayNote = async (currentProgress: UserProgress, dayId: number, note: string, userId: string): Promise<UserProgress> => {
-  // Optimistic update
   const newProgress = {
     ...currentProgress,
     notes: {
@@ -220,63 +268,43 @@ export const saveDayNote = async (currentProgress: UserProgress, dayId: number, 
     }
   };
 
-  if (userId.startsWith('guest_')) {
-    localStorage.setItem(getGuestKey(userId), JSON.stringify(newProgress));
-    return newProgress;
+  persistDual(userId, newProgress);
+
+  if (!userId.startsWith('guest_')) {
+    runBackgroundSync(async () => {
+      await ensureProfileExists(userId);
+      const { data: existing } = await supabase.from('user_daily_entries').select('completed_at').eq('user_id', userId).eq('day_id', dayId).maybeSingle();
+      await supabase.from('user_daily_entries').upsert({
+        user_id: userId,
+        day_id: dayId,
+        note: note,
+        completed_at: existing?.completed_at || null 
+      }, { onConflict: 'user_id, day_id' });
+    });
   }
-
-  // Background Sync
-  runBackgroundSync(async () => {
-    await ensureProfileExists(userId);
-    
-    const { data: existing } = await supabase
-      .from('user_daily_entries')
-      .select('completed_at')
-      .eq('user_id', userId)
-      .eq('day_id', dayId)
-      .maybeSingle();
-
-    await supabase.from('user_daily_entries').upsert({
-      user_id: userId,
-      day_id: dayId,
-      note: note,
-      completed_at: existing?.completed_at || null 
-    }, { onConflict: 'user_id, day_id' });
-  });
 
   return newProgress;
 };
 
 export const deleteDayNote = async (currentProgress: UserProgress, dayId: number, userId: string): Promise<UserProgress> => {
-  // Optimistic update
   const newNotes = { ...currentProgress.notes };
   delete newNotes[dayId];
-
   const newProgress = { ...currentProgress, notes: newNotes };
 
-  if (userId.startsWith('guest_')) {
-    localStorage.setItem(getGuestKey(userId), JSON.stringify(newProgress));
-    return newProgress;
+  persistDual(userId, newProgress);
+
+  if (!userId.startsWith('guest_')) {
+    runBackgroundSync(async () => {
+      await ensureProfileExists(userId);
+      const { data: existing } = await supabase.from('user_daily_entries').select('completed_at').eq('user_id', userId).eq('day_id', dayId).maybeSingle();
+      await supabase.from('user_daily_entries').upsert({
+        user_id: userId,
+        day_id: dayId,
+        note: null,
+        completed_at: existing?.completed_at || null
+      }, { onConflict: 'user_id, day_id' });
+    });
   }
-
-  // Background Sync
-  runBackgroundSync(async () => {
-    await ensureProfileExists(userId);
-
-    const { data: existing } = await supabase
-      .from('user_daily_entries')
-      .select('completed_at')
-      .eq('user_id', userId)
-      .eq('day_id', dayId)
-      .maybeSingle();
-
-    await supabase.from('user_daily_entries').upsert({
-      user_id: userId,
-      day_id: dayId,
-      note: null,
-      completed_at: existing?.completed_at || null
-    }, { onConflict: 'user_id, day_id' });
-  });
 
   return newProgress;
 };
