@@ -6,9 +6,10 @@ import { Star, Flame, Award, Crown, Lock } from 'lucide-react';
 
 interface StatsViewProps {
   progress: UserProgress;
+  totalDays: number;
 }
 
-export const StatsView: React.FC<StatsViewProps> = ({ progress }) => {
+export const StatsView: React.FC<StatsViewProps> = ({ progress, totalDays }) => {
   const data = [
     { name: 'Seg', lidos: 1 },
     { name: 'Ter', lidos: 1 },
@@ -29,11 +30,36 @@ export const StatsView: React.FC<StatsViewProps> = ({ progress }) => {
     }
   };
 
+  // Calculate percentage based on active plan total days
+  const validCompletedCount = progress.completedIds.filter(id => id <= totalDays).length;
+  const percentage = Math.round((validCompletedCount / totalDays) * 100);
+  const displayPercentage = Math.min(100, Math.max(0, percentage));
+
   return (
     <div className="pb-32 space-y-6 animate-in fade-in duration-500">
        <div className="px-2">
          <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Estatísticas</h2>
          <p className="text-gray-500 dark:text-slate-400 text-sm">Acompanhe seu crescimento</p>
+       </div>
+
+       {/* Progresso do Plano Geral */}
+       <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-3xl p-6 shadow-lg shadow-blue-900/10 text-white relative overflow-hidden">
+          <div className="relative z-10">
+             <div className="flex justify-between items-end mb-2">
+               <h3 className="font-bold text-blue-100 text-sm uppercase tracking-wide">Progresso do Plano</h3>
+               <span className="font-bold text-3xl">{displayPercentage}%</span>
+             </div>
+             <div className="w-full h-2 bg-blue-900/30 rounded-full overflow-hidden">
+               <div 
+                 className="h-full bg-white/90 rounded-full transition-all duration-1000 ease-out"
+                 style={{ width: `${displayPercentage}%` }}
+               />
+             </div>
+             <p className="text-xs text-blue-200 mt-2 text-right">
+               {validCompletedCount} de {totalDays} dias concluídos
+             </p>
+          </div>
+          <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-2xl" />
        </div>
        
        {/* Cards de Resumo */}
@@ -41,7 +67,7 @@ export const StatsView: React.FC<StatsViewProps> = ({ progress }) => {
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 transition-colors">
              <p className="text-gray-400 dark:text-slate-500 text-xs font-bold uppercase mb-1">Total Lido</p>
              <div className="flex items-baseline gap-1">
-               <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{progress.completedIds.length}</p>
+               <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{validCompletedCount}</p>
                <span className="text-xs text-blue-400 font-medium">capítulos</span>
              </div>
           </div>

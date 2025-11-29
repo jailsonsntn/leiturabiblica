@@ -278,6 +278,7 @@ const App: React.FC = () => {
             progress={progress}
             userName={user.name}
             currentPlanDayRaw={currentPlanDay}
+            totalPlanDays={currentPlan.days}
             onToggleComplete={handleToggleComplete}
             onSaveNote={handleSaveNote}
           />
@@ -285,7 +286,7 @@ const App: React.FC = () => {
       case ViewState.CALENDAR:
         return <CalendarView progress={progress} totalDays={currentPlan.days} />;
       case ViewState.STATS:
-        return <StatsView progress={progress} />;
+        return <StatsView progress={progress} totalDays={currentPlan.days} />;
       case ViewState.SETTINGS:
         return (
           <SettingsView 

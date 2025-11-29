@@ -13,6 +13,7 @@ interface TodayViewProps {
   progress: UserProgress;
   userName: string;
   currentPlanDayRaw: number; // Raw calculation of plan day (can be negative)
+  totalPlanDays: number; // Total days in current plan
   onToggleComplete: (id: number) => void;
   onSaveNote: (id: number, note: string) => void;
 }
@@ -22,6 +23,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   progress,
   userName, 
   currentPlanDayRaw,
+  totalPlanDays,
   onToggleComplete, 
   onSaveNote 
 }) => {
@@ -139,7 +141,9 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setCheckedChapters(newChecked);
   };
 
-  const yearProgress = Math.min(100, Math.max(0, Math.round((entry.id / 365) * 100)));
+  // UPDATED: Calculate percentage based on actual completed days within current plan
+  const validCompletedCount = progress.completedIds.filter(id => id <= totalPlanDays).length;
+  const planProgress = Math.min(100, Math.max(0, Math.round((validCompletedCount / totalPlanDays) * 100)));
   const firstName = userName.split(' ')[0];
 
   // UI for Pre-Start
@@ -180,21 +184,21 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </div>
         <div className="text-right">
            <div className="w-12 h-12 rounded-full border-4 border-gray-100 dark:border-slate-800 flex items-center justify-center relative">
-              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{yearProgress}%</span>
+              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{planProgress}%</span>
               <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
                 <path
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   fill="none"
                   className="stroke-[#2C6BA6] dark:stroke-blue-500 opacity-20"
                   strokeWidth="3"
-                  strokeDasharray={`${yearProgress}, 100`}
+                  strokeDasharray={`${planProgress}, 100`}
                 />
                  <path
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   fill="none"
                   className="stroke-[#2C6BA6] dark:stroke-blue-500"
                   strokeWidth="3"
-                  strokeDasharray={`${yearProgress}, 100`}
+                  strokeDasharray={`${planProgress}, 100`}
                   strokeLinecap="round"
                 />
               </svg>
