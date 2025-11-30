@@ -7,7 +7,6 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { DailyEntry, UserProgress } from '../../types';
-import { PastoralChat } from '../Shared/PastoralChat';
 import { fetchDailyReadingContent, BibleChapter } from '../../services/bibleService';
 
 interface TodayViewProps {
@@ -453,8 +452,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
                {entry.devotional}
              </p>
           </div>
-
-          <PastoralChat verseText={entry.verseText} verseReference={entry.verseReference} />
 
           <hr className="border-gray-100 dark:border-slate-800" />
 
