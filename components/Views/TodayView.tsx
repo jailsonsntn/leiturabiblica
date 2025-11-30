@@ -3,10 +3,11 @@ import {
   CheckCircle, Circle, Share2, 
   Edit3, Save, BookOpen, Check, Trophy, 
   Trash2, X, Bold, Italic, List, Clock, Calendar,
-  ExternalLink, Youtube, Play
+  ExternalLink, Youtube, Play, Book, ChevronDown, ChevronUp, ArrowLeft
 } from 'lucide-react';
 import { DailyEntry, UserProgress } from '../../types';
 import { PastoralChat } from '../Shared/PastoralChat';
+import { fetchDailyReadingContent, BibleChapter } from '../../services/bibleService';
 
 interface TodayViewProps {
   entry: DailyEntry;
@@ -39,6 +40,12 @@ export const TodayView: React.FC<TodayViewProps> = ({
   
   const [checkedChapters, setCheckedChapters] = useState<number[]>([]);
 
+  // Bible Reader State
+  const [isReadingMode, setIsReadingMode] = useState(false);
+  const [bibleContent, setBibleContent] = useState<BibleChapter[]>([]);
+  const [isLoadingBible, setIsLoadingBible] = useState(false);
+  const [bibleError, setBibleError] = useState(false);
+
   // Pre-start or Post-end check
   const isPreStart = currentPlanDayRaw < 1;
   const isPostEnd = currentPlanDayRaw > totalPlanDays;
@@ -58,6 +65,9 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setIsEditingNote(false);
     setShowDeleteConfirm(false);
     setShareFeedback(false);
+    // Reset reader
+    setBibleContent([]);
+    setIsReadingMode(false);
   }, [entry.id, isDayCompleted, progress.notes, entry.readingPlanRange, entry.chaptersToRead.length]);
 
   // Adjust textarea height automatically
@@ -154,9 +164,31 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setCheckedChapters(newChecked);
   };
 
+  const handleOpenReader = async () => {
+    setIsReadingMode(true);
+    if (bibleContent.length === 0) {
+      setIsLoadingBible(true);
+      setBibleError(false);
+      try {
+        const content = await fetchDailyReadingContent(entry);
+        if (content && content.length > 0) {
+          setBibleContent(content);
+        } else {
+          setBibleError(true);
+        }
+      } catch (e) {
+        setBibleError(true);
+      } finally {
+        setIsLoadingBible(false);
+      }
+    }
+  };
+
   const validCompletedCount = progress.completedIds.filter(id => id <= totalPlanDays).length;
   const planProgress = Math.min(100, Math.max(0, Math.round((validCompletedCount / totalPlanDays) * 100)));
   const firstName = userName.split(' ')[0];
+
+  // --- RENDER MODES ---
 
   // UI for Pre-Start
   if (isPreStart) {
@@ -197,6 +229,93 @@ export const TodayView: React.FC<TodayViewProps> = ({
            <p className="text-xs text-gray-400 uppercase font-bold mb-2">Progresso Final</p>
            <h3 className="font-bold text-lg text-gray-800 dark:text-slate-200">{planProgress}% Concluído</h3>
          </div>
+      </div>
+    );
+  }
+
+  // --- FULL SCREEN READER ---
+  if (isReadingMode) {
+    return (
+      <div className="fixed inset-0 z-50 bg-white dark:bg-slate-950 overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
+        {/* Reader Header */}
+        <div className="bg-white dark:bg-slate-950 border-b border-gray-100 dark:border-slate-800 p-4 flex items-center justify-between shadow-sm z-10">
+           <button 
+             onClick={() => setIsReadingMode(false)}
+             className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-slate-300 transition-colors"
+           >
+             <ArrowLeft size={24} />
+           </button>
+           <div className="text-center">
+             <h3 className="font-bold text-gray-900 dark:text-white text-lg">{entry.readingPlanRange}</h3>
+             <p className="text-xs text-gray-500 dark:text-slate-500 uppercase font-medium">Versão ACF</p>
+           </div>
+           <div className="w-10" /> {/* Spacer */}
+        </div>
+
+        {/* Reader Content */}
+        <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full custom-scrollbar pb-20">
+           {isLoadingBible ? (
+             <div className="flex flex-col items-center justify-center h-64 space-y-4">
+                <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                <p className="text-gray-500 dark:text-slate-400 text-sm animate-pulse">Carregando texto sagrado...</p>
+             </div>
+           ) : bibleError ? (
+             <div className="text-center py-20 px-6">
+                <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 text-red-500">
+                   <BookOpen size={32} />
+                </div>
+                <h4 className="text-lg font-bold text-gray-800 dark:text-slate-200 mb-2">Não foi possível carregar o texto</h4>
+                <p className="text-gray-500 dark:text-slate-400 text-sm mb-6">
+                  Verifique sua conexão ou tente novamente mais tarde. Você pode continuar usando sua Bíblia física.
+                </p>
+                <button 
+                  onClick={() => setIsReadingMode(false)}
+                  className="px-6 py-2 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg font-bold text-sm"
+                >
+                  Voltar
+                </button>
+             </div>
+           ) : (
+             <div className="space-y-12">
+               {bibleContent.map((chapterData, idx) => (
+                 <div key={idx} className="animate-in fade-in duration-700">
+                    <div className="flex items-center justify-center mb-6">
+                       <span className="text-4xl font-serif font-bold text-gray-200 dark:text-slate-800 select-none">
+                         {chapterData.chapter.number}
+                       </span>
+                    </div>
+                    <div className="space-y-4">
+                      {chapterData.verses.map((verse) => (
+                        <p key={verse.number} className="text-lg leading-relaxed text-gray-800 dark:text-slate-300 font-serif">
+                          <sup className="text-[10px] font-sans text-gray-400 dark:text-slate-600 mr-1 select-none">{verse.number}</sup>
+                          {verse.text}
+                        </p>
+                      ))}
+                    </div>
+                 </div>
+               ))}
+               
+               <div className="pt-12 pb-8 text-center">
+                  <div className="w-full h-px bg-gray-100 dark:bg-slate-800 mb-8" />
+                  <p className="text-sm text-gray-400 dark:text-slate-600 italic">
+                    Fim da leitura de hoje.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setIsReadingMode(false);
+                      if (checkedChapters.length !== entry.chaptersToRead.length) {
+                         // Auto-complete visuals
+                         setCheckedChapters(entry.chaptersToRead);
+                      }
+                    }}
+                    className="mt-6 px-8 py-3 bg-blue-600 text-white rounded-full font-bold shadow-lg hover:bg-blue-700 transition-transform active:scale-95"
+                  >
+                    Concluir Leitura
+                  </button>
+               </div>
+             </div>
+           )}
+        </div>
       </div>
     );
   }
@@ -263,10 +382,19 @@ export const TodayView: React.FC<TodayViewProps> = ({
                )}
             </div>
 
-            <div className="space-y-3">
-              <p className="text-sm text-gray-500 dark:text-slate-400 font-medium ml-1">
-                Capítulos para ler:
-              </p>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500 dark:text-slate-400 font-medium ml-1">
+                  Capítulos para ler:
+                </p>
+                <button 
+                  onClick={handleOpenReader}
+                  className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  <Book size={14} />
+                  Ler Texto Bíblico
+                </button>
+              </div>
               
               {/* Scrollable container to prevent overlap on large chapter counts */}
               <div className="max-h-60 overflow-y-auto pr-2 custom-scrollbar">

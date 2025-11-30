@@ -13,7 +13,7 @@ import { loadProgress, toggleDayCompletion, saveDayNote, deleteDayNote, updatePl
 import { supabase } from './services/supabaseClient';
 import { Loader2 } from 'lucide-react';
 
-const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 minutos
+const INACTIVITY_LIMIT_MS = 720 * 60 * 1000; // 12 horas
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -39,7 +39,7 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
-  // Monitor de Atividade para Timeout de 30min
+  // Monitor de Atividade para Timeout
   useEffect(() => {
     const updateActivityTimestamp = () => {
       if (user) {

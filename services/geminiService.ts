@@ -1,8 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize with the project key directly
-const API_KEY = 'AIzaSyAUqrUN1vVXQilQl-hbHRDkv6ip-GBWR9E';
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generatePastoralReflection = async (
   verse: string,
@@ -29,6 +27,6 @@ export const generatePastoralReflection = async (
     return response.text || "Não foi possível gerar uma reflexão no momento.";
   } catch (error) {
     console.error("Error generating reflection:", error);
-    return "O Assistente Pastoral está indisponível no momento. Tente novamente mais tarde.";
+    return "O Assistente Pastoral está indisponível no momento. Verifique a configuração da chave de API.";
   }
 };
