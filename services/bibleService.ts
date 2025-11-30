@@ -1,13 +1,10 @@
 import { DailyEntry } from '../types';
 
 const API_URL = 'https://www.abibliadigital.com.br/api';
-const VERSION = 'acf'; // Changed to ACF (Public Domain) for reliability. NVI often returns 403/500 without token.
+const VERSION = 'acf'; // Almeida Corrigida Fiel (Public Domain)
 
 // Fallback API (Bible-API.com)
 const FALLBACK_API_URL = 'https://bible-api.com';
-// Map book names to English for fallback API if needed (or simple transliteration)
-// Fortunately bible-api.com supports Portuguese 'almeida' version which often accepts PT book names or standard English.
-// We will use a simple mapping for common differences if necessary, but bible-api.com is quite flexible.
 
 export interface BibleVerse {
   number: number;

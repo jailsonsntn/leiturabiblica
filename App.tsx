@@ -12,8 +12,9 @@ import { getEntryForDay, getPlanDayFromDate } from './services/contentService';
 import { loadProgress, toggleDayCompletion, saveDayNote, deleteDayNote, updatePlanStartDate, updateSelectedPlan, updateCustomPlanConfig } from './services/storageService';
 import { supabase } from './services/supabaseClient';
 import { Loader2 } from 'lucide-react';
+import { format } from 'date-fns';
 
-const INACTIVITY_LIMIT_MS = 720 * 60 * 1000; // 12 horas
+const INACTIVITY_LIMIT_MS = 720 * 60 * 1000; // 12 horas (720 min)
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -225,8 +226,8 @@ const App: React.FC = () => {
     // 2. Perform updates sequentially
     let updatedProgress = await updateCustomPlanConfig(progress, newConfig, user.id);
     
-    // Reset Date
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Reset Date to TODAY (Local Time)
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
     updatedProgress = await updatePlanStartDate(updatedProgress, todayStr, user.id);
     
     // Set ID
@@ -243,8 +244,8 @@ const App: React.FC = () => {
     // 1. Save configuration and switch context (book) internally in storage service
     let updatedProgress = await updateCustomPlanConfig(progress, config, user.id);
     
-    // 2. Reset date to today to prevent "Day X > Total Days" issues
-    const todayStr = new Date().toISOString().split('T')[0];
+    // 2. Reset date to today (Local Time) to prevent "Day X > Total Days" issues
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
     updatedProgress = await updatePlanStartDate(updatedProgress, todayStr, user.id);
     
     // 3. Ensure plan is set to custom (or keep standard ID if just overriding duration)
@@ -277,7 +278,7 @@ const App: React.FC = () => {
     // When selecting from history, we explicitly switch to 'custom' plan ID because history items are usually custom books
     // However, if the book belongs to a standard plan, logic might differ, but simpler is to treat as custom view.
     let updatedProgress = await updateCustomPlanConfig(progress, newConfig, user.id);
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
     updatedProgress = await updatePlanStartDate(updatedProgress, todayStr, user.id);
     updatedProgress = await updateSelectedPlan(updatedProgress, 'custom', user.id);
     

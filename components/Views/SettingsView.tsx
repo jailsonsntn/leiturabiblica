@@ -215,7 +215,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   const newPlanId = e.target.value;
                   const newPlan = READING_PLANS.find(p => p.id === newPlanId);
                   
-                  // Use atomic handler from App.tsx
                   if (newPlan) {
                     const defaultDays = newPlan.days || 30;
                     // Force update local state immediately for visual feedback
