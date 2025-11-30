@@ -1,7 +1,7 @@
 import { DailyEntry } from '../types';
 
 const API_URL = 'https://www.abibliadigital.com.br/api';
-const VERSION = 'acf'; // Almeida Corrigida Fiel (Public Domain)
+const VERSION = 'acf'; // Almeida Corrigida Fiel (Domínio Público - Mais estável)
 
 // Fallback API (Bible-API.com)
 const FALLBACK_API_URL = 'https://bible-api.com';
@@ -65,7 +65,7 @@ const ENGLISH_BOOK_MAP: Record<string, string> = {
 const fetchFromFallback = async (bookName: string, chapter: number): Promise<BibleChapter | null> => {
   try {
     const englishName = ENGLISH_BOOK_MAP[bookName] || bookName;
-    // almeida is the PT-BR version on bible-api.com
+    // 'almeida' is the PT-BR version available on bible-api.com
     const response = await fetch(`${FALLBACK_API_URL}/${englishName}+${chapter}?translation=almeida`);
     
     if (!response.ok) throw new Error('Fallback API Failed');

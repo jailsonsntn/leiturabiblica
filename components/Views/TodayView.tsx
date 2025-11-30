@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckCircle, Circle, Share2, 
@@ -15,8 +14,8 @@ interface TodayViewProps {
   entry: DailyEntry;
   progress: UserProgress;
   userName: string;
-  currentPlanDayRaw: number; // Raw calculation of plan day (can be negative)
-  totalPlanDays: number; // Total days in current plan
+  currentPlanDayRaw: number; 
+  totalPlanDays: number;
   onToggleComplete: (id: number) => void;
   onSaveNote: (id: number, note: string) => void;
 }
@@ -48,7 +47,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
   const [isLoadingBible, setIsLoadingBible] = useState(false);
   const [bibleError, setBibleError] = useState(false);
 
-  // Pre-start or Post-end check (Just for warning banner, not blocking)
   const isPreStart = currentPlanDayRaw < 1;
   const isPostEnd = currentPlanDayRaw > totalPlanDays;
 
@@ -67,12 +65,10 @@ export const TodayView: React.FC<TodayViewProps> = ({
     setIsEditingNote(false);
     setShowDeleteConfirm(false);
     setShareFeedback(false);
-    // Reset reader
     setBibleContent([]);
     setIsReadingMode(false);
   }, [entry.id, isDayCompleted, progress.notes, entry.readingPlanRange, entry.chaptersToRead.length]);
 
-  // Adjust textarea height automatically
   useEffect(() => {
     if (isEditingNote && textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -194,7 +190,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
   if (isReadingMode) {
     return (
       <div className="fixed inset-0 z-50 bg-white dark:bg-slate-950 overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
-        {/* Reader Header */}
         <div className="bg-white dark:bg-slate-950 border-b border-gray-100 dark:border-slate-800 p-4 flex items-center justify-between shadow-sm z-10">
            <button 
              onClick={() => setIsReadingMode(false)}
@@ -206,10 +201,9 @@ export const TodayView: React.FC<TodayViewProps> = ({
              <h3 className="font-bold text-gray-900 dark:text-white text-lg">{entry.readingPlanRange}</h3>
              <p className="text-xs text-gray-500 dark:text-slate-500 uppercase font-medium">VERSÃO ACF</p>
            </div>
-           <div className="w-10" /> {/* Spacer */}
+           <div className="w-10" /> 
         </div>
 
-        {/* Reader Content */}
         <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full custom-scrollbar pb-20">
            {isLoadingBible ? (
              <div className="flex flex-col items-center justify-center h-64 space-y-4">
@@ -280,7 +274,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
   return (
     <div className="pb-40 animate-in fade-in duration-500 space-y-6">
       
-      {/* 1. Header Personalizado */}
       <div className="flex items-center justify-between px-1 pt-2">
         <div>
            <h2 className="text-xl font-bold text-gray-800 dark:text-white">
@@ -313,14 +306,13 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </div>
       </div>
 
-      {/* WARNINGS */}
       {isPreStart && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-xl p-4 flex items-start gap-3">
            <AlertCircle className="text-yellow-600 dark:text-yellow-500 shrink-0" size={20} />
            <div>
              <h4 className="text-sm font-bold text-yellow-800 dark:text-yellow-400">Plano não iniciado</h4>
              <p className="text-xs text-yellow-700 dark:text-yellow-500 mt-1">
-               Seu plano começa oficialmente em {Math.abs(currentPlanDayRaw) + 1} dias. Você pode ver o conteúdo abaixo, mas o progresso pode não ser salvo corretamente.
+               Seu plano começa oficialmente em {Math.abs(currentPlanDayRaw) + 1} dias.
              </p>
            </div>
         </div>
@@ -332,13 +324,13 @@ export const TodayView: React.FC<TodayViewProps> = ({
            <div>
              <h4 className="text-sm font-bold text-green-800 dark:text-green-400">Plano Concluído!</h4>
              <p className="text-xs text-green-700 dark:text-green-500 mt-1">
-               Você completou a duração prevista. Você pode iniciar um novo plano nos Ajustes.
+               Você completou a duração prevista.
              </p>
            </div>
         </div>
       )}
 
-      {/* 2. CARD PRINCIPAL DE LEITURA - Estilo Leve/Branco Restaurado */}
+      {/* 2. CARD PRINCIPAL DE LEITURA */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 transition-colors">
          
          <div className="flex items-start justify-between mb-6">
@@ -374,7 +366,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
              </button>
            </div>
            
-           {/* Scrollable container to prevent overlap on large chapter counts */}
            <div className="max-h-60 overflow-y-auto pr-2 custom-scrollbar">
              <div className="flex flex-wrap gap-3">
                {entry.chaptersToRead.map((chapter) => {
@@ -435,7 +426,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
          </div>
       </div>
 
-      {/* 3. CARD DE INSPIRAÇÃO E NOTAS */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800 overflow-hidden transition-colors">
         
         <div className="relative h-40 w-full">
@@ -468,7 +458,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
           <hr className="border-gray-100 dark:border-slate-800" />
 
-          {/* LINK PARA MÚSICA (SEM PLAYER) */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-gray-800 dark:text-white">
                <Youtube size={16} className="text-red-600" />
@@ -502,11 +491,9 @@ export const TodayView: React.FC<TodayViewProps> = ({
 
           <hr className="border-gray-100 dark:border-slate-800" />
 
-          {/* EDITOR DE NOTAS */}
           <div className="bg-yellow-50/50 dark:bg-yellow-900/10 rounded-xl border border-yellow-100 dark:border-yellow-900/20 overflow-hidden transition-all duration-300">
             {isEditingNote ? (
               <div className="flex flex-col">
-                {/* Toolbar */}
                 <div className="flex items-center justify-between p-2 border-b border-yellow-100 dark:border-yellow-900/20 bg-yellow-50 dark:bg-yellow-900/20">
                    <div className="flex gap-1">
                       <button onClick={() => insertFormatting('bold')} className="p-2 text-yellow-700 dark:text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-800/30 rounded" title="Negrito">
@@ -529,7 +516,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
                        <span className="text-xs text-red-600 dark:text-red-400 font-bold">Apagar?</span>
                        <button onClick={handleNoteDelete} className="p-1.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-md hover:bg-red-200"><Check size={14} /></button>
                        <button onClick={() => setShowDeleteConfirm(false)} className="p-1.5 bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-300 rounded-md hover:bg-gray-300"><X size={14} /></button>
-                       <button onClick={() => setShowDeleteConfirm(false)} className="p-1.5 bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-300 rounded-md hover:bg-gray-300"><X size={14} /></button>
                      </div>
                    ) : (
                      <button onClick={() => setShowDeleteConfirm(true)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded">
@@ -550,7 +536,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 <div className="flex justify-end gap-2 p-3 bg-white/50 dark:bg-slate-900/20">
                    <button 
                      onClick={() => {
-                       setNote(existingNote); // Revert
+                       setNote(existingNote);
                        setIsEditingNote(false);
                        setShowDeleteConfirm(false);
                      }}
@@ -568,7 +554,6 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 </div>
               </div>
             ) : (
-              // Modo de Visualização
               <div 
                 className="p-4 cursor-pointer group hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-colors"
                 onClick={() => setIsEditingNote(true)}
