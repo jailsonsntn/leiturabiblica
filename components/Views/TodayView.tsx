@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckCircle, Circle, Share2, 
@@ -47,7 +48,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
   const [isLoadingBible, setIsLoadingBible] = useState(false);
   const [bibleError, setBibleError] = useState(false);
 
-  // Pre-start or Post-end check
+  // Pre-start or Post-end check (Just for warning banner, not blocking)
   const isPreStart = currentPlanDayRaw < 1;
   const isPostEnd = currentPlanDayRaw > totalPlanDays;
 
@@ -275,7 +276,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
     );
   }
 
-  // Normal Flow - Estilo leve e limpo
+  // Normal Flow
   return (
     <div className="pb-40 animate-in fade-in duration-500 space-y-6">
       
@@ -312,7 +313,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </div>
       </div>
 
-      {/* WARNINGS - Instead of blocking, show a banner */}
+      {/* WARNINGS */}
       {isPreStart && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/50 rounded-xl p-4 flex items-start gap-3">
            <AlertCircle className="text-yellow-600 dark:text-yellow-500 shrink-0" size={20} />
@@ -337,7 +338,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </div>
       )}
 
-      {/* 2. CARD PRINCIPAL DE LEITURA - Estilo Limpo */}
+      {/* 2. CARD PRINCIPAL DE LEITURA - Estilo Leve/Branco Restaurado */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 transition-colors">
          
          <div className="flex items-start justify-between mb-6">
